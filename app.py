@@ -686,6 +686,24 @@ class ComfyClient:
         return path
 
 
+def load_api_workflow(filename: str, setting: str) -> dict[str, Any]:
+    path = Path(filename).expanduser()
+    if not path.is_file():
+        raise ValueError(f"ComfyUI workflow not found: {path}. Export a tested workflow using ComfyUI's "
+                         f"Export (API) / Save (API Format), upload that JSON to the GPU instance, and set "
+                         f"{setting} to its full path before starting this app. Setting the variable does not create the file.")
+    try:
+        graph = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (json.JSONDecodeError, UnicodeError):
+        raise ValueError(f"{path} is not valid UTF-8 JSON. Export the workflow again in ComfyUI API format.") from None
+    if (not isinstance(graph, dict) or not graph or "nodes" in graph
+            or any(not isinstance(node, dict) or not isinstance(node.get("inputs"), dict)
+                   or not isinstance(node.get("class_type"), str) for node in graph.values())):
+        raise ValueError(f"{path} is not a ComfyUI API workflow. Use Export (API) / Save (API Format); "
+                         "the ordinary canvas JSON is a different format.")
+    return graph
+
+
 def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
     config = {"url": os.getenv("COMFY_URL", "http://127.0.0.1:8188"),
               "output_dir": str(Path(os.getenv("COMFY_OUTPUT_DIR", "/workspace/ComfyUI/output")).resolve()),
@@ -694,9 +712,7 @@ def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
                   ("video_node", "COMFY_VIDEO_NODE", ""), ("seed_node", "COMFY_SEED_NODE", ""),
                   ("prompt_input", "COMFY_PROMPT_INPUT", "text"), ("image_input", "COMFY_IMAGE_INPUT", "image"),
                   ("seed_input", "COMFY_SEED_INPUT", "seed")]}}
-    graph = json.loads(Path(os.getenv("COMFY_WORKFLOW", "/workspace/workflow_api.json")).read_text(encoding="utf-8"))
-    if not isinstance(graph, dict) or "nodes" in graph:
-        raise ValueError("Workflow must be exported in API format")
+    graph = load_api_workflow(os.getenv("COMFY_WORKFLOW", "/workspace/workflow_api.json"), "COMFY_WORKFLOW")
     for role in ("prompt", "image", "video", "seed"):
         node = config[role + "_node"]
         if role == "seed" and not node:
@@ -775,9 +791,7 @@ def anchor_workflow_config(video_graph: dict[str, Any]) -> tuple[dict[str, Any],
     """
     filename = os.getenv("COMFY_ANCHOR_WORKFLOW")
     if filename:
-        graph = json.loads(Path(filename).read_text(encoding="utf-8"))
-        if not isinstance(graph, dict) or "nodes" in graph:
-            raise ValueError("COMFY_ANCHOR_WORKFLOW must use ComfyUI API format")
+        graph = load_api_workflow(filename, "COMFY_ANCHOR_WORKFLOW")
     else:
         checkpoint = os.getenv("AUTO_CHARACTER_CHECKPOINT") or next(
             (node.get("inputs", {}).get("ckpt_name") for node in video_graph.values()
@@ -1931,6 +1945,21 @@ def self_test() -> None:
     from unittest.mock import Mock, patch
 
     class Tests(unittest.TestCase):
+        def test_workflow_setup_errors_and_api_export(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "workflow_api.json"
+                with self.assertRaisesRegex(ValueError, "Setting the variable does not create the file"):
+                    load_api_workflow(str(path), "COMFY_WORKFLOW")
+                path.write_text('{"nodes": []}')
+                with self.assertRaisesRegex(ValueError, "ordinary canvas JSON"):
+                    load_api_workflow(str(path), "COMFY_WORKFLOW")
+                path.write_text('{bad json')
+                with self.assertRaisesRegex(ValueError, "not valid UTF-8 JSON"):
+                    load_api_workflow(str(path), "COMFY_WORKFLOW")
+                graph = {"6": {"class_type": "CLIPTextEncode", "inputs": {"text": "test"}}}
+                path.write_text(json.dumps(graph), encoding="utf-8-sig")
+                self.assertEqual(load_api_workflow(str(path), "COMFY_WORKFLOW"), graph)
+
         def test_continuity_discovery_never_repurposes_master(self):
             graph = {"master": {"class_type": "LoadImage", "inputs": {"image": "master.png"}},
                      "tail": {"class_type": "LoadImage", "inputs": {"image": "tail.png"}},
