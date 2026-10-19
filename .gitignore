@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+*.log
+/state.json
+/credentials.key
+/.credentials
+/google_oauth_client.json
+/automatic_workflow.json
+/studio.lock
+/runs/
+/public_media/
+/setup/
+/ComfyUI/models/

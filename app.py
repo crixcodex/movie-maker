@@ -4,7 +4,16 @@ Install:
   pip install gradio requests cryptography google-api-python-client google-auth-httplib2 google-auth-oauthlib dropbox
   # Install ffmpeg/ffprobe separately; install/configure vastai for teardown.
 
-Required configuration (IDs refer to your exported ComfyUI API workflow):
+Automatic first-run setup (default when no workflow file exists):
+  Discovers the local ComfyUI API (including Vast's internal port 18188), creates
+  a core Wan 2.2 TI2V workflow, and downloads missing official public weights.
+  Downloads are resumable and SHA-256 verified; first run requires about 18 GB
+  of model storage plus space for clips. A CUDA GPU with sufficient memory is
+  required. The core profile uses native reference conditioning and locked
+  prompts/seeds; independent adapters/temporal chaining need a custom workflow.
+  python app.py --prepare  # optional: provision without rendering/shutdown
+
+Optional custom configuration (IDs refer to your exported ComfyUI API workflow):
   COMFY_WORKFLOW=/workspace/workflow_api.json
   COMFY_PROMPT_NODE=6 COMFY_IMAGE_NODE=10 COMFY_VIDEO_NODE=42
 Optional input names: COMFY_PROMPT_INPUT=text COMFY_IMAGE_INPUT=image
@@ -15,7 +24,8 @@ Image input is optional. Auto-Character Mode additionally needs either:
   (optional COMFY_ANCHOR_PROMPT_INPUT=text COMFY_ANCHOR_SEED_INPUT=seed)
 or AUTO_CHARACTER_CHECKPOINT=an_installed_SD_or_SDXL_checkpoint.safetensors
   A CheckpointLoaderSimple in the video graph can also supply that checkpoint.
-  No models are downloaded or guessed. Anchor workflow batch size must be 1.
+  Custom anchor workflow batch size must be 1. Automatic mode reuses the Wan
+  TI2V model for its text-to-image master anchor without another model download.
   COMFY_INPUT_DIR=/workspace/ComfyUI/input
   CHARACTER_SEED=12345  # optional: otherwise one random seed is saved per movie
   All new shots reuse that seed and the same master image. Configure the video
@@ -177,9 +187,11 @@ def bind_shot_consistency(shots: list[dict[str, Any]], settings: dict[str, Any],
         shot.setdefault("motion_seed", (master_seed + (offset % (span + 1))) % (2**63))
 
 
-def consistency_config(graph: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+def consistency_config(graph: dict[str, Any], config: dict[str, Any],
+                       settings_override: dict[str, Any] | None = None) -> dict[str, Any]:
     filename = os.getenv("CONSISTENCY_CONFIG")
-    settings = json.loads(Path(filename).read_text(encoding="utf-8")) if filename else {}
+    settings = (copy.deepcopy(settings_override) if settings_override is not None else
+                json.loads(Path(filename).read_text(encoding="utf-8")) if filename else {})
     if not isinstance(settings, dict):
         raise ValueError("CONSISTENCY_CONFIG must contain a JSON object")
     settings.setdefault("identity_tokens", os.getenv("CHARACTER_IDENTITY_TOKENS", IDENTITY_ANCHOR))
@@ -704,7 +716,9 @@ def load_api_workflow(filename: str, setting: str) -> dict[str, Any]:
     return graph
 
 
-def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
+def workflow_config(graph_override: dict[str, Any] | None = None,
+                    mappings: dict[str, Any] | None = None,
+                    profile: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     config = {"url": os.getenv("COMFY_URL", "http://127.0.0.1:8188"),
               "output_dir": str(Path(os.getenv("COMFY_OUTPUT_DIR", "/workspace/ComfyUI/output")).resolve()),
               **{key: os.getenv(variable, default) for key, variable, default in [
@@ -712,7 +726,10 @@ def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
                   ("video_node", "COMFY_VIDEO_NODE", ""), ("seed_node", "COMFY_SEED_NODE", ""),
                   ("prompt_input", "COMFY_PROMPT_INPUT", "text"), ("image_input", "COMFY_IMAGE_INPUT", "image"),
                   ("seed_input", "COMFY_SEED_INPUT", "seed")]}}
-    graph = load_api_workflow(os.getenv("COMFY_WORKFLOW", "/workspace/workflow_api.json"), "COMFY_WORKFLOW")
+    if mappings:
+        config.update(mappings)
+    graph = (copy.deepcopy(graph_override) if graph_override is not None else
+             load_api_workflow(os.getenv("COMFY_WORKFLOW", "/workspace/workflow_api.json"), "COMFY_WORKFLOW"))
     for role in ("prompt", "image", "video", "seed"):
         node = config[role + "_node"]
         if role == "seed" and not node:
@@ -724,7 +741,8 @@ def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
     config["input_dir"] = str(Path(os.getenv("COMFY_INPUT_DIR", str(Path(config["output_dir"]).parent / "input"))).resolve())
     # Bind file-loader inputs, not IMAGE-valued sockets on IP-Adapter nodes.
     # Adapter/identity nodes must already be connected to these loader outputs.
-    config["image_bindings"] = json.loads(os.getenv("COMFY_IMAGE_BINDINGS", "[]"))
+    config["image_bindings"] = (copy.deepcopy(mappings.get("image_bindings", [])) if mappings else
+                                json.loads(os.getenv("COMFY_IMAGE_BINDINGS", "[]")))
     if not isinstance(config["image_bindings"], list):
         raise ValueError("COMFY_IMAGE_BINDINGS must be a JSON list of node/input objects")
     for binding in config["image_bindings"]:
@@ -736,7 +754,7 @@ def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
                                if name in {"seed", "noise_seed"} and type(value) is int]
     if not config["seed_node"] and not config["seed_bindings"]:
         raise ValueError("Video workflow must expose a literal seed/noise_seed, or configure COMFY_SEED_NODE / input")
-    config["consistency"] = consistency_config(graph, config)
+    config["consistency"] = consistency_config(graph, config, profile)
     for item in config["consistency"]["adapters"]:
         graph[item["node"]]["inputs"].update(copy.deepcopy(item.get("links", {})))
     continuity = config["consistency"]["continuity"]
@@ -781,6 +799,229 @@ def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
         if not upstream.intersection(masters):
             raise ValueError("Adapter reference image/latent must be connected to an immutable master-image loader")
     return graph, config
+
+
+class SetupError(RuntimeError):
+    """An actionable provisioning error safe to display without provider secrets."""
+
+
+# Official model artifacts used by Comfy-Org's video_wan2_2_5B_ti2v template.
+# Downloads use a pinned repository commit and the Hub's LFS SHA-256 metadata.
+AUTO_MODELS = (
+    ("UNETLoader", "unet_name", "diffusion_models", "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+     "split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors"),
+    ("CLIPLoader", "clip_name", "text_encoders", "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+     "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"),
+    ("VAELoader", "vae_name", "vae", "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+     "split_files/vae/wan2.2_vae.safetensors"),
+)
+
+
+def model_choices(info: dict[str, Any], node: str, field: str) -> list[str]:
+    definition = info.get(node, {}).get("input", {}).get("required", {}).get(field, [])
+    return definition[0] if definition and isinstance(definition[0], list) else []
+
+
+def provision_model(models: Path, spec: tuple[str, ...], notice: Callable[[str], None]) -> str:
+    """Resume interrupted downloads; promote only checksum-verified weights.
+
+    A .part file is never visible to ComfyUI as a model. Metadata is saved before
+    transfer, so a retry/restart continues the exact same immutable artifact.
+    """
+    import requests
+    _, _, category, repo, remote_file = spec
+    target = models / category / Path(remote_file).name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    receipt = target.with_suffix(target.suffix + ".source.json")
+    metadata = {}
+    if receipt.is_file():
+        metadata = json.loads(receipt.read_text(encoding="utf-8"))
+    if not metadata:
+        response = requests.get(f"https://huggingface.co/api/models/{repo}",
+                                params={"blobs": "true"}, timeout=(15, 90))
+        response.raise_for_status()
+        result = response.json()
+        entry = next((s for s in result.get("siblings", []) if s["rfilename"] == remote_file), {})
+        metadata = {"repo": repo, "file": remote_file, "revision": result.get("sha"),
+                    "sha256": entry.get("lfs", {}).get("sha256"), "size": entry.get("size")}
+        if (not re.fullmatch(r"[a-f0-9]{40}", metadata.get("revision") or "")
+                or not re.fullmatch(r"[a-f0-9]{64}", metadata.get("sha256") or "")
+                or type(metadata.get("size")) is not int or metadata["size"] <= 0):
+            raise SetupError(f"Official model metadata has no verifiable checksum: {target.name}")
+        atomic_json(receipt, metadata)
+    if (metadata.get("repo") != repo or metadata.get("file") != remote_file
+            or not re.fullmatch(r"[a-f0-9]{40}", str(metadata.get("revision", "")))
+            or not re.fullmatch(r"[a-f0-9]{64}", str(metadata.get("sha256", "")))
+            or type(metadata.get("size")) is not int or metadata["size"] <= 0):
+        raise SetupError(f"Invalid saved model download metadata: {target.name}")
+    if target.is_file():
+        notice(f"Verifying installed model {target.name}...")
+        if target.stat().st_size == metadata["size"] and digest(target) == metadata["sha256"]:
+            return target.name
+        raise SetupError(f"Existing model {target.name} failed checksum verification; retained for investigation.")
+    partial = target.with_suffix(target.suffix + ".part")
+    offset = partial.stat().st_size if partial.exists() else 0
+    if offset > metadata["size"]:
+        raise SetupError(f"Oversized partial model download: {target.name}")
+    remaining = metadata["size"] - offset
+    if shutil.disk_usage(target.parent).free < remaining + 2 * 1024**3:
+        raise SetupError(f"Not enough disk space for {target.name}: need {remaining / 1024**3:.1f} GiB plus 2 GiB reserve.")
+    url = f"https://huggingface.co/{repo}/resolve/{metadata['revision']}/{remote_file}"
+    if remaining:
+        notice(f"Downloading {target.name}: {offset / metadata['size']:.0%} of {metadata['size'] / 1024**3:.1f} GiB.")
+        headers = {"Range": f"bytes={offset}-"} if offset else {}
+        with requests.get(url, headers=headers, stream=True, timeout=(15, 120)) as response:
+            response.raise_for_status()
+            if offset and response.status_code == 200:
+                offset = 0  # Server ignored Range; restart rather than append corrupt data.
+            elif response.status_code == 206:
+                expected = f"bytes {offset}-"
+                if not response.headers.get("Content-Range", "").startswith(expected):
+                    raise SetupError("Model server returned an incorrect resume range")
+            elif response.status_code != 200:
+                raise SetupError("Unexpected model download response")
+            heartbeat = time.monotonic()
+            with partial.open("ab" if offset else "wb") as handle:
+                for block in response.iter_content(chunk_size=4 * 1024 * 1024):
+                    if not block:
+                        continue
+                    handle.write(block)
+                    offset += len(block)
+                    if offset > metadata["size"]:
+                        raise SetupError("Model download exceeded its declared size")
+                    if time.monotonic() - heartbeat >= 10:
+                        notice(f"Downloading {target.name}: {offset / metadata['size']:.0%}")
+                        heartbeat = time.monotonic()
+                handle.flush()
+                os.fsync(handle.fileno())
+    notice(f"Checking SHA-256 for {target.name}...")
+    if partial.stat().st_size != metadata["size"] or digest(partial) != metadata["sha256"]:
+        # Quarantine bad bytes so the next retry can start cleanly.
+        os.replace(partial, partial.with_suffix(".corrupt"))
+        raise SetupError(f"Downloaded model checksum mismatch: {target.name}")
+    os.replace(partial, target)
+    fsync_directory(target.parent)
+    notice(f"Model installed and verified: {target.name}")
+    return target.name
+
+
+def automatic_workflow(root: Path, notice: Callable[[str], None]) -> dict[str, Any]:
+    """Provision a core Wan 2.2 profile without custom nodes or manual node IDs.
+
+    Native I2V reuses the immutable master image for each shot. This model has no
+    separate identity adapter input: do not falsely enable frame chaining, which
+    would replace its only reference with a progressively drifting last frame.
+    """
+    import requests
+    deadline = time.monotonic() + 7200
+    while True:
+        try:
+            lock = WorkspaceLock(root / "setup")
+            break
+        except RuntimeError:
+            if time.monotonic() >= deadline:
+                raise SetupError("Another setup process is still preparing the models; retry Attach / Resume Checkpoint later.") from None
+            notice("Waiting for the existing model setup process; its downloads are continuing...")
+            time.sleep(10)
+    try:
+        requested = os.getenv("COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
+        candidates = [requested]
+        if urlsplit(requested).hostname in {"localhost", "127.0.0.1"}:
+            candidates += ["http://127.0.0.1:18188", "http://127.0.0.1:8188"]
+        info, url = {}, requested
+        for candidate in dict.fromkeys(candidates):
+            try:
+                response = requests.get(candidate + "/object_info", timeout=(3, 30))
+                response.raise_for_status()
+                value = response.json()
+                if isinstance(value, dict) and "KSampler" in value:
+                    info, url = value, candidate
+                    break
+            except (requests.RequestException, ValueError):
+                continue
+        if not info:
+            raise SetupError("ComfyUI is unavailable. Automatic setup checked the local API ports 8188 and 18188; no compatible API responded.")
+        notice(f"Connected to ComfyUI at {url}. Preparing automatic Wan 2.2 movie workflow.")
+        required = {"UNETLoader", "CLIPLoader", "VAELoader", "CLIPTextEncode", "LoadImage", "KSampler",
+                    "ModelSamplingSD3", "Wan22ImageToVideoLatent", "VAEDecode", "SaveImage", "CreateVideo", "SaveVideo"}
+        missing = sorted(required - info.keys())
+        if missing:
+            raise SetupError("ComfyUI is missing required core nodes: " + ", ".join(missing))
+        comfy_root = Path(os.getenv("COMFY_ROOT", "/workspace/ComfyUI")).resolve()
+        models = comfy_root / "models"
+        names = []
+        for spec in AUTO_MODELS:
+            filename = Path(spec[4]).name
+            installed = next((name for name in model_choices(info, spec[0], spec[1])
+                              if Path(name.replace("\\", "/")).name == filename), None)
+            local = models / spec[2] / filename
+            if installed and not local.with_suffix(local.suffix + ".source.json").exists():
+                notice(f"Reusing installed model: {installed}")
+                names.append(installed)
+            else:
+                names.append(retry(lambda spec=spec: provision_model(models, spec, notice),
+                                   "Automatic model installation", notice))
+        # Re-read model lists: ComfyUI updates directory caches without a restart.
+        fresh = requests.get(url + "/object_info", timeout=(10, 60))
+        fresh.raise_for_status()
+        info = fresh.json()
+        for spec, name in zip(AUTO_MODELS, names):
+            if name not in model_choices(info, spec[0], spec[1]):
+                raise SetupError(f"ComfyUI cannot see installed model {name}; its model directory differs from COMFY_ROOT.")
+        graph = build_automatic_wan_graph(info, names)
+        graph, config = workflow_config(graph, {
+            "url": url, "output_dir": str(comfy_root / "output"),
+            "prompt_node": "6", "prompt_input": "text", "image_node": "56", "image_input": "image",
+            "video_node": "58", "seed_node": "3", "seed_input": "seed", "image_bindings": []},
+            {"continuity": {"mode": "off"}})
+        # Same TI2V model supports text-only anchor generation: no extra model or
+        # separate SDXL configuration required when the user leaves image blank.
+        anchor = copy.deepcopy(graph)
+        for node in ("56", "57", "58"):
+            anchor.pop(node)
+        anchor["55"]["inputs"].pop("start_image")
+        anchor["55"]["inputs"]["length"] = 1
+        anchor["9"] = {"class_type": "SaveImage", "inputs": {
+            "images": ["8", 0], "filename_prefix": "studio/auto_master_character"}}
+        result = {"workflow": graph, "comfy": config, "anchor_workflow": anchor,
+                  "anchor_config": {"prompt_node": "6", "prompt_input": "text", "seed_node": "3",
+                                    "seed_input": "seed", "output_node": "9"}, "prepared_at": utc()}
+        atomic_json(root / "automatic_workflow.json", result)
+        notice("Automatic setup complete. Native reference conditioning and locked prompts/seeds enabled; separate adapter/temporal chaining unavailable in this core profile.")
+        return result
+    finally:
+        lock.close()
+
+
+def build_automatic_wan_graph(info: dict[str, Any], names: list[str]) -> dict[str, Any]:
+    """API translation of Comfy-Org's tested Wan 2.2 5B TI2V template.
+
+    Source: github.com/Comfy-Org/workflow_templates, templates/
+    video_wan2_2_5B_ti2v.json. 121 frames at 24fps normalize to exactly five seconds.
+    """
+    save = {"video": ["57", 0], "filename_prefix": "studio/shot", "format": "auto"}
+    schema = info["SaveVideo"].get("input", {}).get("required", {})
+    if schema.get("format", [None])[0] == "COMFY_DYNAMICCOMBO_V3":
+        save["format.codec"] = "auto"  # Dynamic API inputs use dotted child names.
+    elif "codec" in schema:
+        save["codec"] = "auto"
+    return {
+        "37": {"class_type": "UNETLoader", "inputs": {"unet_name": names[0], "weight_dtype": "default"}},
+        "38": {"class_type": "CLIPLoader", "inputs": {"clip_name": names[1], "type": "wan", "device": "default"}},
+        "39": {"class_type": "VAELoader", "inputs": {"vae_name": names[2]}},
+        "48": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["37", 0], "shift": 8.0}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["38", 0]}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "blurry, low quality, distorted face, extra limbs, text, watermark, static shot", "clip": ["38", 0]}},
+        "56": {"class_type": "LoadImage", "inputs": {"image": "auto_master_character.png"}},
+        "55": {"class_type": "Wan22ImageToVideoLatent", "inputs": {"vae": ["39", 0],
+                "width": 1280, "height": 704, "length": 121, "batch_size": 1, "start_image": ["56", 0]}},
+        "3": {"class_type": "KSampler", "inputs": {"model": ["48", 0], "positive": ["6", 0],
+               "negative": ["7", 0], "latent_image": ["55", 0], "seed": 0, "steps": 20,
+               "cfg": 5.0, "sampler_name": "uni_pc", "scheduler": "simple", "denoise": 1.0}},
+        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["39", 0]}},
+        "57": {"class_type": "CreateVideo", "inputs": {"images": ["8", 0], "fps": 24.0}},
+        "58": {"class_type": "SaveVideo", "inputs": save},
+    }
 
 
 def anchor_workflow_config(video_graph: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
@@ -1187,6 +1428,27 @@ class Studio:
         with self.live_lock:
             self.lines.append(f"[{utc()}] {message}")
 
+    def publish_media(self, source: Path) -> Path:
+        """Serve only media, never grant Gradio access to private checkpoints.
+
+        Hard links avoid duplicating large movies on the same filesystem. A
+        copy fallback handles filesystems that do not support hard links.
+        """
+        if source.suffix.lower() not in {".mp4", ".ts"}:
+            raise ValueError("Only finished video media can be published")
+        target = self.root / "public_media" / self.store.data["job_id"] / source.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_file() and os.path.samefile(source, target):
+            return target
+        pending = target.with_suffix(target.suffix + ".pending")
+        pending.unlink(missing_ok=True)
+        try:
+            os.link(source, pending)
+        except OSError:
+            shutil.copyfile(source, pending)
+        os.replace(pending, target)
+        return target
+
     def running(self) -> bool:
         return bool(self.thread and self.thread.is_alive())
 
@@ -1225,8 +1487,20 @@ class Studio:
                 secret = google_credentials
             if provider == "Dropbox" and destination != "/":
                 destination = destination.rstrip("/")
-            graph, config = workflow_config()
-            anchor_graph, anchor_config = anchor_workflow_config(graph) if not image else ({}, {})
+            # Provision missing workflow/models in the coordinator, never inside
+            # the Gradio request thread. The job is checkpointed before downloads.
+            setup_pending = False
+            try:
+                graph, config = workflow_config()
+            except ValueError:
+                if Path(os.getenv("COMFY_WORKFLOW", "/workspace/workflow_api.json")).is_file():
+                    raise  # Preserve errors in explicitly supplied custom workflows.
+                setup_pending = True
+                graph, config = {}, {}
+            if setup_pending:
+                anchor_graph, anchor_config = {}, {}
+            else:
+                anchor_graph, anchor_config = anchor_workflow_config(graph) if not image else ({}, {})
             master_seed = int(os.getenv("CHARACTER_SEED", str(uuid.uuid4().int % (2**63))))
             if not 0 <= master_seed < 2**63:
                 raise ValueError("CHARACTER_SEED must be between 0 and 2**63-1")
@@ -1262,7 +1536,8 @@ class Studio:
             if self.store.path.exists():
                 atomic_bytes(Path(self.store.data["folder"]) / "state.archive.json", self.store.path.read_bytes())
             self.store.data = {"schema": 1, "job_id": job_id, "folder": str(folder), "created_at": utc(),
-                "status": "planning", "plot": plot, "shot_count": count, "shots": [],
+                "status": "setting_up" if setup_pending else "planning", "setup_pending": setup_pending,
+                "plot": plot, "shot_count": count, "shots": [],
                 "reference": str(reference) if reference else None, "anchor": anchor, "master_seed": master_seed,
                 "workflow": graph, "comfy": config, "media": {"width": width, "height": height, "fps": fps},
                 "cloud": cloud, "shutdown": True, "master_shot_ids": []}
@@ -1547,8 +1822,9 @@ class Studio:
                         self.notice(f"Shot {shot['shot_id']} media processing failed; skipping.")
                         continue
                     self.checkpoint_shot(shot, status="completed", clip_sha256=digest(clip), completed_at=utc())
+                    public_transport = self.publish_media(transport)
                     with self.live_lock:
-                        self.streams.append(str(transport))
+                        self.streams.append(str(public_transport))
                     retry(self.assemble, "Master assembly", self.notice)
                 finally:
                     work.task_done()
@@ -1574,8 +1850,9 @@ class Studio:
             transport = clip.with_suffix(".ts")
             if not transport.exists():
                 transport = preview(clip)
+            public_transport = self.publish_media(transport)
             with self.live_lock:
-                self.streams.append(str(transport))
+                self.streams.append(str(public_transport))
 
     def backup_final_movie(self, final: Path) -> None:
         """Optional post-processing: errors are persisted/logged, never re-raised.
@@ -1652,6 +1929,16 @@ class Studio:
                 self.notice("Verified final movie checkpoint found; resuming post-processing.")
                 self.complete_movie(final)
                 return
+            if state.get("setup_pending"):
+                stage = "automatic ComfyUI setup"
+                self.notice("First-run setup: preparing the workflow and checking required models. Downloads resume automatically after interruption.")
+                prepared = automatic_workflow(self.root, self.notice)
+                with self.store.lock:
+                    state.update(workflow=prepared["workflow"], comfy=prepared["comfy"],
+                                 setup_pending=False, status="planning")
+                    if state["anchor"]["mode"] == "auto":
+                        state["anchor"].update(workflow=prepared["anchor_workflow"], config=prepared["anchor_config"])
+                    self.store.save()
             if not state["shots"]:
                 stage = "storyboard planning"
                 shots = plan_shots(state["plot"], state["shot_count"], self.notice)
@@ -1734,6 +2021,8 @@ class Studio:
             self.notice(f"Pipeline stopped during {stage} ({type(exc).__name__}). "
                         + ("Final movie retained; automatic teardown will still run."
                            if final_ready else "Checkpoint retained; shutdown withheld until final movie is ready."))
+            if isinstance(exc, SetupError):
+                self.notice(str(exc))
             LOG.error("Failure category %s during %s; stack (exception payload omitted):\n%s",
                       type(exc).__name__, stage, "".join(traceback.format_tb(exc.__traceback__)))
             with self.store.lock:
@@ -1785,8 +2074,13 @@ class Studio:
         # Numeric instance ID, trusted PATH, fixed command, safely quoted log path.
         # flock makes repeated scheduling after a crash harmless on Linux.
         folder = Path(state["folder"])
+        stop_command = f"sleep 10 && vastai stop instance {instance}"
+        if os.getenv("CONTAINER_API_KEY"):
+            # Vast's in-container CLI is not pre-authenticated. Expand the
+            # credential only inside the child shell; never put it in logs/state.
+            stop_command += ' --api-key "$CONTAINER_API_KEY"'
         shell = (f"flock -n {shlex.quote(str(folder / 'teardown.lock'))} "
-                 f"sh -c {shlex.quote(f'sleep 10 && vastai stop instance {instance}')}")
+                 f"sh -c {shlex.quote(stop_command)}")
         code = os.system(f"nohup sh -c {shlex.quote(shell)} > "
                          f"{shlex.quote(str(folder / 'shutdown.log'))} 2>&1 < /dev/null &")
         if code != 0:
@@ -1847,7 +2141,7 @@ def build_app(studio: Studio) -> Any:
             final = state.get("final_file") if state.get("movie_ready") else None
             final_output = gr.skip()
             if final and state.get("final_sha256") != delivered_final:
-                final_output = final
+                final_output = str(studio.publish_media(Path(final)))
                 delivered_final = state.get("final_sha256")
             yield clip if clip else gr.skip(), logs, final_output, label
             if not studio.running() and not clip:
@@ -1861,7 +2155,7 @@ def build_app(studio: Studio) -> Any:
             # Resuming an existing job uses its encrypted checkpoint credentials.
             resuming = studio.store.data and studio.store.data.get("status") not in TERMINAL
             if provider == "Google Drive" and not google_token and not resuming:
-                raise ValueError("Sign in with Google Drive and complete sign-in before starting a Drive-backed movie.")
+                studio.notice("Google Drive is not authorized; optional backup will be skipped for this job.")
             studio.start(plot, image, minutes, provider, destination,
                          secret if provider == "Dropbox" else "", google_credentials=google_token)
         except Exception as exc:
@@ -1945,6 +2239,114 @@ def self_test() -> None:
     from unittest.mock import Mock, patch
 
     class Tests(unittest.TestCase):
+        def test_public_media_does_not_expose_checkpoint_files(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                studio.store.data = {"job_id": "test-job"}
+                source = Path(tmp) / "movie.mp4"
+                source.write_bytes(b"finished movie")
+                public = studio.publish_media(source)
+                self.assertEqual(public.read_bytes(), source.read_bytes())
+                self.assertTrue(public.is_relative_to(Path(tmp) / "public_media"))
+                self.assertEqual(studio.publish_media(source), public)
+                with self.assertRaises(ValueError):
+                    studio.publish_media(Path(tmp) / "state.json")
+
+        def test_missing_workflow_is_checkpointed_for_background_setup(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                with patch.dict(os.environ, {"COMFY_WORKFLOW": str(Path(tmp) / "missing.json")}), \
+                     patch.object(studio, "launch") as launch:
+                    studio.start("A traveler discovers a garden", None, 1, "None", "", "")
+                launch.assert_called_once()
+                recovered = StateStore(Path(tmp)).data
+                self.assertTrue(recovered["setup_pending"])
+                self.assertEqual(recovered["status"], "setting_up")
+                self.assertEqual(recovered["anchor"]["mode"], "auto")
+
+        def test_automatic_graph_supports_new_and_legacy_video_schema(self):
+            names = [Path(spec[4]).name for spec in AUTO_MODELS]
+            for definition, field in [({"format": ["COMFY_DYNAMICCOMBO_V3"]}, "format.codec"),
+                                      ({"format": [["auto"]], "codec": [["auto"]]}, "codec")]:
+                info = {"SaveVideo": {"input": {"required": definition}}}
+                graph = build_automatic_wan_graph(info, names)
+                self.assertEqual(graph["58"]["inputs"][field], "auto")
+                with patch.dict(os.environ, {"CONSISTENCY_CONFIG": "missing-legacy-profile.json"}):
+                    _, config = workflow_config(graph, {"prompt_node": "6", "prompt_input": "text",
+                        "image_node": "56", "image_input": "image", "video_node": "58", "seed_node": "3",
+                        "seed_input": "seed"}, {"continuity": {"mode": "off"}})
+                self.assertEqual(config["consistency"]["continuity"]["mode"], "off")
+                self.assertEqual(graph["55"]["inputs"]["start_image"], ["56", 0])
+
+        def test_automatic_setup_creates_independent_text_only_anchor(self):
+            from types import SimpleNamespace
+            names = [Path(spec[4]).name for spec in AUTO_MODELS]
+            info = {item["class_type"]: {} for item in build_automatic_wan_graph(
+                {"SaveVideo": {"input": {"required": {"format": ["COMFY_DYNAMICCOMBO_V3"]}}}}, names).values()}
+            info["SaveImage"] = {}
+            info["SaveVideo"] = {"input": {"required": {"format": ["COMFY_DYNAMICCOMBO_V3"]}}}
+            for spec, name in zip(AUTO_MODELS, names):
+                info[spec[0]] = {"input": {"required": {spec[1]: [[name]]}}}
+            response = Mock()
+            response.json.return_value = info
+            with tempfile.TemporaryDirectory() as tmp:
+                with patch.dict(sys.modules, {"requests": SimpleNamespace(get=Mock(return_value=response), RequestException=OSError)}), \
+                     patch.dict(os.environ, {"COMFY_ROOT": str(Path(tmp) / "comfy"),
+                                             "CONSISTENCY_CONFIG": "irrelevant-legacy-profile.json"}):
+                    result = automatic_workflow(Path(tmp), lambda _: None)
+                self.assertNotIn("start_image", result["anchor_workflow"]["55"]["inputs"])
+                self.assertEqual(result["anchor_workflow"]["55"]["inputs"]["length"], 1)
+                self.assertEqual(result["workflow"]["55"]["inputs"]["length"], 121)
+                self.assertNotIn("56", result["anchor_workflow"])
+                self.assertEqual(result["anchor_workflow"]["9"]["class_type"], "SaveImage")
+                self.assertTrue((Path(tmp) / "automatic_workflow.json").is_file())
+
+        def test_model_download_resumes_and_verifies_before_promotion(self):
+            from types import SimpleNamespace
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                spec = AUTO_MODELS[0]
+                target = root / spec[2] / Path(spec[4]).name
+                target.parent.mkdir()
+                payload = b"verified model bytes"
+                atomic_json(target.with_suffix(target.suffix + ".source.json"), {
+                    "repo": spec[3], "file": spec[4], "revision": "a" * 40,
+                    "sha256": hashlib.sha256(payload).hexdigest(), "size": len(payload)})
+                part = target.with_suffix(target.suffix + ".part")
+                part.write_bytes(payload[:4])
+                response = Mock(status_code=206, headers={"Content-Range": f"bytes 4-{len(payload)-1}/{len(payload)}"})
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                response.iter_content.return_value = [payload[4:]]
+                get = Mock(return_value=response)
+                with patch.dict(sys.modules, {"requests": SimpleNamespace(get=get)}):
+                    result = provision_model(root, spec, lambda _: None)
+                self.assertEqual(result, target.name)
+                self.assertEqual(get.call_args.kwargs["headers"]["Range"], "bytes=4-")
+                self.assertEqual(target.read_bytes(), payload)
+                self.assertFalse(part.exists())
+                # Corrupt complete files must not be silently trusted or replaced.
+                target.write_bytes(b"corrupt")
+                with patch.dict(sys.modules, {"requests": SimpleNamespace(get=get)}), self.assertRaises(SetupError):
+                    provision_model(root, spec, lambda _: None)
+
+        def test_model_checksum_failure_quarantines_partial_file(self):
+            from types import SimpleNamespace
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                spec = AUTO_MODELS[0]
+                target = root / spec[2] / Path(spec[4]).name
+                target.parent.mkdir()
+                atomic_json(target.with_suffix(target.suffix + ".source.json"), {
+                    "repo": spec[3], "file": spec[4], "revision": "a" * 40,
+                    "sha256": hashlib.sha256(b"good").hexdigest(), "size": 4})
+                target.with_suffix(target.suffix + ".part").write_bytes(b"evil")
+                with patch.dict(sys.modules, {"requests": SimpleNamespace()}), self.assertRaises(SetupError):
+                    provision_model(root, spec, lambda _: None)
+                self.assertFalse(target.exists())
+                self.assertFalse(target.with_suffix(target.suffix + ".part").exists())
+                self.assertTrue(target.with_suffix(target.suffix + ".corrupt").exists())
+
         def test_workflow_setup_errors_and_api_export(self):
             with tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / "workflow_api.json"
@@ -2418,7 +2820,7 @@ def self_test() -> None:
                 studio = Studio(folder, acquire_lock=False)
                 shot = {"shot_id": 1, "status": "completed", "clip_sha256": digest(clip),
                         "prompt_id": "original", "attempts": 1}
-                studio.store.data = {"schema": 1, "folder": tmp, "shots": [shot]}
+                studio.store.data = {"schema": 1, "job_id": "recovery-test", "folder": tmp, "shots": [shot]}
                 studio.store.save()
                 studio.recover_clips()
                 self.assertEqual(shot["status"], "completed")
@@ -2544,6 +2946,7 @@ def self_test() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--prepare", action="store_true", help="Prepare automatic workflows/models without rendering or shutdown")
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -2556,6 +2959,9 @@ def main() -> None:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(threadName)s %(message)s"))
     LOG.addHandler(handler)
     LOG.addHandler(logging.StreamHandler())
+    if args.prepare:
+        automatic_workflow(root, lambda message: LOG.info(message))
+        return
     username, password = os.getenv("STUDIO_USER"), os.getenv("STUDIO_PASSWORD")
     if bool(username) != bool(password):
         raise ValueError("Set both STUDIO_USER and STUDIO_PASSWORD")
@@ -2566,6 +2972,7 @@ def main() -> None:
         server_name=os.getenv("STUDIO_HOST", "127.0.0.1"),
         server_port=int(os.getenv("STUDIO_PORT", "7860")),
         auth=(username, password) if username else None,
+        allowed_paths=[str(root / "public_media")],
         blocked_paths=[str(root / "state.json"), str(root / "studio.log"), str(root / "credentials.key"),
                        str(Path(os.getenv("GOOGLE_OAUTH_CLIENT_FILE", str(root / "google_oauth_client.json"))).resolve()),
                        str(Path(os.getenv("STUDIO_CREDENTIALS_FILE", str(root / ".credentials"))).resolve())])
