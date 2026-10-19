@@ -1,7 +1,7 @@
 """Autonomous AI Movie Studio -- one Python file, Python 3.11+.
 
 Install:
-  pip install gradio requests cryptography google-api-python-client google-auth-httplib2 dropbox
+  pip install gradio requests cryptography google-api-python-client google-auth-httplib2 google-auth-oauthlib dropbox
   # Install ffmpeg/ffprobe separately; install/configure vastai for teardown.
 
 Required configuration (IDs refer to your exported ComfyUI API workflow):
@@ -9,6 +9,20 @@ Required configuration (IDs refer to your exported ComfyUI API workflow):
   COMFY_PROMPT_NODE=6 COMFY_IMAGE_NODE=10 COMFY_VIDEO_NODE=42
 Optional input names: COMFY_PROMPT_INPUT=text COMFY_IMAGE_INPUT=image
 Optional seed mapping: COMFY_SEED_NODE=3 COMFY_SEED_INPUT=seed
+Image input is optional. Auto-Character Mode additionally needs either:
+  COMFY_ANCHOR_WORKFLOW=/workspace/anchor_workflow_api.json  # preferred T2I API graph
+  COMFY_ANCHOR_PROMPT_NODE=6 COMFY_ANCHOR_SEED_NODE=3 COMFY_ANCHOR_OUTPUT_NODE=9
+  (optional COMFY_ANCHOR_PROMPT_INPUT=text COMFY_ANCHOR_SEED_INPUT=seed)
+or AUTO_CHARACTER_CHECKPOINT=an_installed_SD_or_SDXL_checkpoint.safetensors
+  A CheckpointLoaderSimple in the video graph can also supply that checkpoint.
+  No models are downloaded or guessed. Anchor workflow batch size must be 1.
+  COMFY_INPUT_DIR=/workspace/ComfyUI/input
+  CHARACTER_SEED=12345  # optional: otherwise one random seed is saved per movie
+  All new shots reuse that seed and the same master image. Configure the video
+  graph's image loader -> IP-Adapter/FaceID/I2V conditioning -> video output.
+  Additional file-loader bindings (not adapter IMAGE sockets) can be configured:
+  COMFY_IMAGE_BINDINGS='[{"node":"55","input":"image"}]'
+  Same pixels/seed/settings reduce drift but cannot guarantee identical identity.
 Paths: STUDIO_DIR=/workspace COMFY_OUTPUT_DIR=/workspace/ComfyUI/output
 API: COMFY_URL=http://127.0.0.1:8188
 Local OpenAI-compatible LLM: LLM_URL=http://127.0.0.1:11434/v1
@@ -18,9 +32,21 @@ Media: MOVIE_WIDTH=1920 MOVIE_HEIGHT=1080 MOVIE_FPS=24
   Workflow must generate five-second silent video clips. Audio is intentionally
   removed to keep every segment compatible. Upscaling cannot create detail.
 
-Cloud backup is optional (provider None by default); incomplete settings skip it.
-Credentials may be a plain API access token, Google service-account JSON, or
-refreshable OAuth JSON (recommended for a long-running movie):
+Cloud backup is optional (provider None by default). Google sign-in setup:
+  Enable the Google Drive API in your Google Cloud project, configure its OAuth
+  consent screen, and create a Desktop app OAuth client. Download its client JSON.
+  GOOGLE_OAUTH_CLIENT_FILE=/workspace/google_oauth_client.json
+  GOOGLE_OAUTH_PORT=7862  # separate loopback-only callback listener, started lazily
+  With the dashboard on a remote GPU, forward BOTH 7860 and 7862 through SSH.
+  Redirect URI: http://127.0.0.1:7862/
+  Sign in, then click Complete Google Sign-in. The optional authorization-code
+  field accepts the callback's code or the full redirect URL (state is required).
+  The obsolete urn:ietf:wg:oauth:2.0:oob flow is deliberately not used.
+  Login tokens live in server session memory; starting a job encrypts a credential
+  snapshot in its checkpoint so restart recovery can still upload unattended.
+  No plaintext credentials.json token file is written.
+
+Legacy programmatic/mounted credentials and Dropbox OAuth JSON remain supported:
   Google: authorized_user JSON (client_id, client_secret, refresh_token,
           token_uri=https://oauth2.googleapis.com/token)
   Dropbox: {"app_key":"...", "app_secret":"...", "refresh_token":"..."}
@@ -44,8 +70,9 @@ Operational contract:
 * Three attempts per shot, exponential backoff; exhausted shots are skipped.
   A partial movie is explicitly marked partial in the manifest; cloud backup
   is attempted only when its provider, destination, and credentials are present.
-* A verified local final movie is required for teardown. Cloud backup success,
-  failure, or omission never prevents the requested ten-second GPU stop hook.
+* A verified local final movie is required for teardown. When backup is active,
+  verified cloud delivery is also required; failures retain the movie for retry.
+  Local-only jobs still stop the GPU ten seconds after final assembly.
 * Upload SDK sessions retry in-process; a restart may re-upload bytes, but reuses
   the same Drive file ID / Dropbox path instead of creating duplicate movies.
 * Rebuilding the cumulative MP4 copies all completed bytes each time (quadratic
@@ -57,6 +84,8 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import html
+import io
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -66,6 +95,7 @@ from pathlib import Path
 import queue
 import random
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -76,12 +106,15 @@ import traceback
 import uuid
 from collections import deque
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Iterator
+from urllib.parse import parse_qs, urlsplit
 
 
 LOG = logging.getLogger("movie_studio")
 ATTEMPTS = 3
 TERMINAL = {"complete", "partial", "shutdown_scheduled"}
+GOOGLE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 
 def utc() -> str:
@@ -348,18 +381,28 @@ class ComfyClient:
 
     def submit(self, workflow: dict[str, Any], shot: dict[str, Any], reference: str, marker: str) -> str:
         graph = copy.deepcopy(workflow)
-        text = f"{shot['visual_prompt']} Camera: {shot['camera_movement']}. Lighting: {shot['lighting_cue']}."
+        text = ("Use the master reference as the character and visual-style guide. Preserve the protagonist's "
+                "face, age, hairstyle, wardrobe, accessories, proportions, palette, and rendering style. "
+                f"{shot['visual_prompt']} Camera: {shot['camera_movement']}. Lighting: {shot['lighting_cue']}.")
         graph[self.config["prompt_node"]]["inputs"][self.config["prompt_input"]] = text
         graph[self.config["image_node"]]["inputs"][self.config["image_input"]] = reference
+        for binding in self.config.get("image_bindings", []):
+            graph[binding["node"]]["inputs"][binding["input"]] = reference
         if self.config["seed_node"]:
             graph[self.config["seed_node"]]["inputs"][self.config["seed_input"]] = shot["seed"]
+        for binding in self.config.get("seed_bindings", []):
+            graph[binding["node"]]["inputs"][binding["input"]] = shot["seed"]
+        return self.submit_graph(graph, marker)
+
+    def submit_graph(self, graph: dict[str, Any], marker: str) -> str:
         result = self.request("POST", "/prompt", json={"prompt": graph, "client_id": marker,
             "extra_data": {"extra_pnginfo": {"studio_marker": marker}}})
         if result.get("node_errors") or not result.get("prompt_id"):
             raise ValueError("ComfyUI rejected workflow inputs; inspect workflow in ComfyUI")
         return result["prompt_id"]
 
-    def wait(self, prompt_id: str, notice: Callable[[str], None]) -> Path:
+    def wait(self, prompt_id: str, notice: Callable[[str], None], *,
+             output_node: str | None = None, kind: str = "video") -> Path:
         timeout = float(os.getenv("SHOT_TIMEOUT", "7200"))
         deadline, heartbeat = time.monotonic() + timeout, 0.0
         failures = 0
@@ -382,7 +425,7 @@ class ComfyClient:
                 ):
                     raise ValueError("ComfyUI execution failed or was interrupted")
                 if status.get("completed"):
-                    return self.video(record)
+                    return self.output_image(record, output_node) if kind == "image" else self.video(record)
             if time.monotonic() >= heartbeat:
                 notice(f"Waiting for ComfyUI prompt {prompt_id}...")
                 heartbeat = time.monotonic() + 20
@@ -411,6 +454,25 @@ class ComfyClient:
             raise FileNotFoundError("ComfyUI video is not available on the shared filesystem")
         return path
 
+    def output_image(self, record: dict[str, Any], output_node: str | None) -> Path:
+        root = Path(self.config["output_dir"]).resolve()
+        items = record.get("outputs", {}).get(output_node, {}).get("images", [])
+        paths = set()
+        for item in items:
+            if not isinstance(item, dict) or item.get("type", "output") != "output":
+                continue
+            path = (root / item.get("subfolder", "") / item.get("filename", "")).resolve()
+            if not path.is_relative_to(root):
+                raise ValueError("Anchor output escapes ComfyUI output directory")
+            if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                paths.add(path)
+        if len(paths) != 1:
+            raise ValueError("Anchor workflow must save exactly one image; set batch_size=1")
+        path = paths.pop()
+        if not path.is_file() or not path.stat().st_size:
+            raise FileNotFoundError("Generated anchor image is not available on the shared filesystem")
+        return path
+
 
 def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
     config = {"url": os.getenv("COMFY_URL", "http://127.0.0.1:8188"),
@@ -431,7 +493,264 @@ def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
             raise ValueError(f"Configure COMFY_{role.upper()}_NODE")
         if role != "video" and config[role + "_input"] not in graph[node].get("inputs", {}):
             raise ValueError(f"Configure COMFY_{role.upper()}_INPUT")
+    config["input_dir"] = str(Path(os.getenv("COMFY_INPUT_DIR", str(Path(config["output_dir"]).parent / "input"))).resolve())
+    # Bind file-loader inputs, not IMAGE-valued sockets on IP-Adapter nodes.
+    # Adapter/identity nodes must already be connected to these loader outputs.
+    config["image_bindings"] = json.loads(os.getenv("COMFY_IMAGE_BINDINGS", "[]"))
+    if not isinstance(config["image_bindings"], list):
+        raise ValueError("COMFY_IMAGE_BINDINGS must be a JSON list of node/input objects")
+    for binding in config["image_bindings"]:
+        if (not isinstance(binding, dict) or binding.get("node") not in graph
+                or binding.get("input") not in graph[binding["node"]].get("inputs", {})):
+            raise ValueError("Invalid COMFY_IMAGE_BINDINGS loader node/input mapping")
+    config["seed_bindings"] = [{"node": node, "input": name} for node, item in graph.items()
+                               for name, value in item.get("inputs", {}).items()
+                               if name in {"seed", "noise_seed"} and type(value) is int]
+    if not config["seed_node"] and not config["seed_bindings"]:
+        raise ValueError("Video workflow must expose a literal seed/noise_seed, or configure COMFY_SEED_NODE / input")
+    # Verify each mapped file loader actually contributes to the saved video.
+    reachable, pending = set(), [config["video_node"]]
+    while pending:
+        node = pending.pop()
+        if node in reachable:
+            continue
+        reachable.add(node)
+        for value in graph[node].get("inputs", {}).values():
+            if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str) and value[0] in graph:
+                pending.append(value[0])
+    for binding in [{"node": config["image_node"], "input": config["image_input"]}] + config["image_bindings"]:
+        if binding["node"] not in reachable:
+            raise ValueError("A configured master-image loader is disconnected from the video output")
+        if not isinstance(graph[binding["node"]]["inputs"][binding["input"]], str):
+            raise ValueError("Map image filenames to file-loader string inputs, not adapter IMAGE sockets")
     return graph, config
+
+
+def anchor_workflow_config(video_graph: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    """Use an exported T2I graph, or build a standard SD/SDXL bootstrap graph.
+
+    Never fabricate an IP-Adapter graph for an incompatible video architecture.
+    The video API template remains responsible for actual identity conditioning.
+    """
+    filename = os.getenv("COMFY_ANCHOR_WORKFLOW")
+    if filename:
+        graph = json.loads(Path(filename).read_text(encoding="utf-8"))
+        if not isinstance(graph, dict) or "nodes" in graph:
+            raise ValueError("COMFY_ANCHOR_WORKFLOW must use ComfyUI API format")
+    else:
+        checkpoint = os.getenv("AUTO_CHARACTER_CHECKPOINT") or next(
+            (node.get("inputs", {}).get("ckpt_name") for node in video_graph.values()
+             if node.get("class_type") == "CheckpointLoaderSimple"), None)
+        if not checkpoint:
+            raise ValueError("Auto-Character Mode needs COMFY_ANCHOR_WORKFLOW (exported text-to-image API graph), "
+                             "or AUTO_CHARACTER_CHECKPOINT naming an installed SD/SDXL checkpoint.")
+        graph = {
+            "3": {"class_type": "KSampler", "inputs": {"seed": 0, "steps": 24, "cfg": 6.5,
+                "sampler_name": "euler", "scheduler": "normal", "denoise": 1.0,
+                "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0]}},
+            "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": checkpoint}},
+            "5": {"class_type": "EmptyLatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+            "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["4", 1]}},
+            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "multiple people, collage, text, watermark, blurry face",
+                                                                  "clip": ["4", 1]}},
+            "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+            "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "studio_anchor"}},
+        }
+    config = {"prompt_node": os.getenv("COMFY_ANCHOR_PROMPT_NODE", "6"),
+              "prompt_input": os.getenv("COMFY_ANCHOR_PROMPT_INPUT", "text"),
+              "seed_node": os.getenv("COMFY_ANCHOR_SEED_NODE", "3"),
+              "seed_input": os.getenv("COMFY_ANCHOR_SEED_INPUT", "seed"),
+              "output_node": os.getenv("COMFY_ANCHOR_OUTPUT_NODE", "9")}
+    for role in ("prompt", "seed", "output"):
+        node = config[role + "_node"]
+        if node not in graph or (role != "output" and config[role + "_input"] not in graph[node].get("inputs", {})):
+            raise ValueError(f"Configure COMFY_ANCHOR_{role.upper()}_NODE / input for your anchor workflow")
+    return graph, config
+
+
+def save_anchor_png(source: Path, target: Path) -> None:
+    from PIL import Image, ImageOps
+    with Image.open(source) as image:
+        image.load()
+        if image.width < 64 or image.height < 64:
+            raise ValueError("Generated master anchor is too small")
+        pixels = ImageOps.exif_transpose(image).convert("RGB")
+        encoded = io.BytesIO()
+        pixels.save(encoded, format="PNG")
+        atomic_bytes(target, encoded.getvalue())
+
+
+class GoogleDriveOAuth:
+    """Session-isolated Desktop OAuth with PKCE and a loopback callback.
+
+    The callback never logs its URL/code. Its state must match an outstanding,
+    unexpired attempt. Bare codes are accepted only after a validated callback;
+    full redirect URLs can be pasted if the callback tunnel is unavailable.
+    """
+
+    TTL = 600
+    CALLBACK_PATH = "/"
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.port = int(os.getenv("GOOGLE_OAUTH_PORT", "7862"))
+        if not 1024 <= self.port <= 65535:
+            raise ValueError("GOOGLE_OAUTH_PORT must be between 1024 and 65535")
+        self.redirect_uri = f"http://127.0.0.1:{self.port}{self.CALLBACK_PATH}"
+        self.lock = threading.RLock()
+        self.pending: dict[str, dict[str, Any]] = {}
+        self.tokens: dict[str, str] = {}
+        self.server: ThreadingHTTPServer | None = None
+
+    def _purge(self) -> None:
+        expired = [state for state, item in self.pending.items()
+                   if time.monotonic() - item["created"] > self.TTL]
+        for state in expired:
+            del self.pending[state]
+
+    def forget(self, owner: str) -> None:
+        with self.lock:
+            self.tokens.pop(owner, None)
+            for state in [state for state, item in self.pending.items() if item["owner"] == owner]:
+                del self.pending[state]
+
+    def serialized_credentials(self, owner: str) -> str:
+        with self.lock:
+            return self.tokens.get(owner, "")
+
+    def _new_flow(self) -> Any:
+        from google_auth_oauthlib.flow import Flow
+        filename = Path(os.getenv("GOOGLE_OAUTH_CLIENT_FILE", str(self.root / "google_oauth_client.json")))
+        if not filename.is_file():
+            raise ValueError("Set GOOGLE_OAUTH_CLIENT_FILE to your downloaded Desktop app OAuth client JSON.")
+        config = json.loads(filename.read_text(encoding="utf-8"))
+        installed = config.get("installed", {})
+        if not installed.get("client_id") or not installed.get("client_secret"):
+            raise ValueError("Use a Google OAuth client of type Desktop app, not service-account JSON.")
+        # Pin provider endpoints instead of trusting arbitrary URLs in a file.
+        safe_config = {"installed": {"client_id": installed["client_id"],
+            "client_secret": installed["client_secret"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/v2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [self.redirect_uri]}}
+        return Flow.from_client_config(safe_config, scopes=GOOGLE_SCOPES,
+                                       redirect_uri=self.redirect_uri, autogenerate_code_verifier=True)
+
+    def _ensure_server(self) -> None:
+        if self.server:
+            return
+        manager = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args: Any) -> None:
+                pass  # Request targets contain authorization codes: never log them.
+
+            def do_GET(self) -> None:
+                status, message, code = manager.capture_callback(self.path)
+                page = ("<!doctype html><meta charset='utf-8'><title>Movie Studio Google Sign-in</title>"
+                        f"<h2>Google Drive sign-in</h2><p>{html.escape(message)}</p>")
+                if code:
+                    page += ("<p>Return to Movie Studio and click <b>Complete Google Sign-in</b>. "
+                             "The code field may be left empty. Optional code:</p>"
+                             f"<pre>{html.escape(code)}</pre>")
+                payload = page.encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+                self.end_headers()
+                self.wfile.write(payload)
+
+        # Only reachable on the GPU's loopback interface / the user's SSH tunnel.
+        self.server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
+        threading.Thread(target=self.server.serve_forever, name="google-oauth-callback", daemon=True).start()
+
+    def begin(self, owner: str) -> str:
+        with self.lock:
+            self._purge()
+            self.tokens.pop(owner, None)
+            for state in [state for state, item in self.pending.items() if item["owner"] == owner]:
+                del self.pending[state]
+            if len(self.pending) >= 128:
+                raise ValueError("Too many pending sign-in attempts; try again shortly.")
+            flow = self._new_flow()
+            self._ensure_server()
+            url, state = flow.authorization_url(access_type="offline", prompt="consent")
+            parsed = urlsplit(url)
+            if parsed.scheme != "https" or parsed.netloc != "accounts.google.com":
+                raise ValueError("OAuth library returned an unexpected authorization endpoint")
+            self.pending[state] = {"owner": owner, "flow": flow, "created": time.monotonic(),
+                                   "code": None, "exchanging": False}
+            return url
+
+    def capture_callback(self, target: str) -> tuple[int, str, str | None]:
+        if len(target) > 16384:
+            return 400, "Invalid callback.", None
+        parsed = urlsplit(target)
+        if parsed.path != self.CALLBACK_PATH:
+            return 404, "Not found.", None
+        values = parse_qs(parsed.query)
+        states, codes = values.get("state", []), values.get("code", [])
+        with self.lock:
+            self._purge()
+            item = self.pending.get(states[0]) if len(states) == 1 else None
+            if not item:
+                return 400, "Sign-in state is invalid or expired. Start sign-in again.", None
+            if values.get("error"):
+                return 400, "Google permission was denied. Return to the studio and start sign-in again.", None
+            if len(codes) != 1 or not codes[0] or not codes[0].isascii() or len(codes[0]) > 4096:
+                return 400, "No valid authorization code received.", None
+            if item["exchanging"] or (item["code"] and not secrets.compare_digest(item["code"], codes[0])):
+                return 400, "Callback was already used. Start sign-in again.", None
+            item["code"] = codes[0]
+            return 200, "Google returned a valid authorization response.", codes[0]
+
+    def finish(self, owner: str, pasted: str = "") -> None:
+        with self.lock:
+            self._purge()
+            matches = [(state, item) for state, item in self.pending.items() if item["owner"] == owner]
+            if len(matches) != 1:
+                raise ValueError("No pending sign-in for this session. Click Sign in with Google Drive first.")
+            state, item = matches[0]
+            pasted = (pasted or "").strip()
+            if pasted.startswith(("http://", "https://")):
+                parsed, expected = urlsplit(pasted), urlsplit(self.redirect_uri)
+                query = parse_qs(parsed.query)
+                incoming_state = query.get("state", [])
+                if ((parsed.scheme, parsed.netloc, parsed.path) != (expected.scheme, expected.netloc, expected.path)
+                        or len(incoming_state) != 1 or not secrets.compare_digest(incoming_state[0], state)):
+                    raise ValueError("Return URL does not match this session's sign-in attempt.")
+                status, _, code = self.capture_callback(pasted)
+                if status != 200:
+                    raise ValueError("Invalid Google return URL. Start sign-in again.")
+                pasted = code or ""
+            if not item["code"]:
+                raise ValueError("Awaiting the Google callback. Forward the callback port, or paste the full "
+                                 "return URL from the browser address bar (including state).")
+            if pasted and not secrets.compare_digest(pasted, item["code"]):
+                raise ValueError("Authorization code does not match this session's callback.")
+            if item["exchanging"]:
+                raise ValueError("Sign-in exchange is already in progress.")
+            item["exchanging"] = True
+            flow, code = item["flow"], item["code"]
+        try:
+            # Pass code directly; no insecure-HTTP override or plaintext token file.
+            flow.fetch_token(code=code, timeout=60)
+            if not flow.credentials.refresh_token:
+                raise ValueError("Google did not grant offline access. Start sign-in again and grant permission.")
+            token_json = flow.credentials.to_json()
+            with self.lock:
+                if self.pending.get(state) is not item:
+                    raise ValueError("Sign-in was cancelled or replaced. Try again.")
+                self.tokens[owner] = token_json
+                del self.pending[state]  # Codes are one-use and never persisted.
+        except Exception:
+            with self.lock:
+                item["exchanging"] = False
+            raise
 
 
 def credential_spec(secret: str, root: Path | None = None) -> dict[str, str]:
@@ -627,16 +946,17 @@ class Studio:
             self.notice("Interrupted checkpoint detected; automatically resuming.")
             self.launch()
 
-    def start(self, plot: str, image: str, minutes: float, provider: str,
-              destination: str, secret: str, shutdown: bool = True) -> None:
+    def start(self, plot: str, image: str | None, minutes: float, provider: str,
+              destination: str, secret: str, shutdown: bool = True,
+              google_credentials: str = "") -> None:
         with self.guard:
             if self.running():
                 raise ValueError("A movie is already running; attach to the current job")
             if self.store.data and self.store.data.get("status") not in TERMINAL:
                 self.launch()
                 return
-            if not plot.strip() or not image:
-                raise ValueError("Provide both a movie plot and character reference image")
+            if not plot.strip():
+                raise ValueError("Provide a movie plot")
             count = int(round(float(minutes) * 60 / 5))
             if not 1 <= count <= 720:
                 raise ValueError("Duration must be between five seconds and 60 minutes")
@@ -645,9 +965,16 @@ class Studio:
             if provider not in {"None", "Google Drive", "Dropbox"}:
                 raise ValueError("Select a cloud provider")
             destination = (destination or "").strip()
+            if provider == "Google Drive" and google_credentials:
+                destination = destination or "root"
+                secret = google_credentials
             if provider == "Dropbox" and destination != "/":
                 destination = destination.rstrip("/")
             graph, config = workflow_config()
+            anchor_graph, anchor_config = anchor_workflow_config(graph) if not image else ({}, {})
+            master_seed = int(os.getenv("CHARACTER_SEED", str(uuid.uuid4().int % (2**63))))
+            if not 0 <= master_seed < 2**63:
+                raise ValueError("CHARACTER_SEED must be between 0 and 2**63-1")
             cloud = {"provider": provider, "destination": destination, "credentials": {}, "status": "pending"}
             if provider != "None" and destination and (secret.strip() or os.getenv("STUDIO_CREDENTIALS_FILE")):
                 try:
@@ -660,11 +987,18 @@ class Studio:
             job_id = uuid.uuid4().hex
             folder = self.root / "runs" / job_id
             folder.mkdir(parents=True, mode=0o700)
-            suffix = Path(image).suffix.lower()
-            if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
-                raise ValueError("Use PNG, JPEG, WebP, or BMP character reference")
-            reference = folder / ("reference" + suffix)
-            atomic_bytes(reference, Path(image).read_bytes())
+            reference = None
+            if image:
+                suffix = Path(image).suffix.lower()
+                if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+                    raise ValueError("Use PNG, JPEG, WebP, or BMP character reference")
+                reference = folder / ("reference" + suffix)
+                atomic_bytes(reference, Path(image).read_bytes())
+            anchor = {"mode": "provided" if image else "auto", "seed": master_seed,
+                      "status": "ready" if image else "pending", "attempts": 0,
+                      "workflow": anchor_graph, "config": anchor_config}
+            if reference:
+                anchor.update(image_path=str(reference), image_sha256=digest(reference))
             width = int(os.getenv("MOVIE_WIDTH", "1920"))
             height = int(os.getenv("MOVIE_HEIGHT", "1080"))
             fps = int(os.getenv("MOVIE_FPS", "24"))
@@ -673,7 +1007,8 @@ class Studio:
             if self.store.path.exists():
                 atomic_bytes(Path(self.store.data["folder"]) / "state.archive.json", self.store.path.read_bytes())
             self.store.data = {"schema": 1, "job_id": job_id, "folder": str(folder), "created_at": utc(),
-                "status": "planning", "plot": plot, "shot_count": count, "shots": [], "reference": str(reference),
+                "status": "planning", "plot": plot, "shot_count": count, "shots": [],
+                "reference": str(reference) if reference else None, "anchor": anchor, "master_seed": master_seed,
                 "workflow": graph, "comfy": config, "media": {"width": width, "height": height, "fps": fps},
                 "cloud": cloud, "shutdown": True, "master_shot_ids": []}
             self.store.save()
@@ -686,6 +1021,90 @@ class Studio:
         with self.store.lock:
             shot.update(changes)
             self.store.save()
+
+    def ensure_master_anchor(self, client: ComfyClient) -> Path:
+        """Create once, checkpoint before shots, reuse the exact same pixels.
+
+        A run-private image is authoritative. The required fixed input filename
+        is a convenience alias; every clip gets a job-unique upload of the same
+        cached anchor, avoiding collisions with other users of ComfyUI.
+        """
+        state = self.store.data
+        if state.get("reference") and not state.get("anchor"):
+            # Backward compatibility with pre-Auto-Character checkpoints.
+            return Path(state["reference"])
+        anchor = state["anchor"]
+        if anchor["mode"] == "provided":
+            reference = Path(anchor["image_path"])
+            if not reference.is_file() or digest(reference) != anchor["image_sha256"]:
+                raise RuntimeError("Uploaded master reference is missing/corrupt; restore it before resuming")
+            self.notice("Using uploaded character reference as the fixed master anchor.")
+            return reference
+        cached = Path(state["folder"]) / "master_character.png"
+        input_dir = Path(state["comfy"].get("input_dir", str(Path(state["comfy"]["output_dir"]).parent / "input")))
+        alias = input_dir / "auto_master_character.png"
+        expected_hash = anchor.get("image_sha256")
+        if (expected_hash and (not cached.exists() or digest(cached) != expected_hash)
+                and alias.is_file() and digest(alias) == expected_hash):
+            atomic_bytes(cached, alias.read_bytes())
+        if expected_hash and cached.is_file() and digest(cached) == expected_hash:
+            if not alias.is_file() or digest(alias) != expected_hash:
+                atomic_bytes(alias, cached.read_bytes())
+            self.notice("Auto-Character anchor recovered from checkpoint; reusing identical master image.")
+            return cached
+        self.notice(f"Auto-Character Mode: generating master identity/style anchor with locked seed {anchor['seed']}.")
+        first = state["shots"][0]
+        description = ("Create the single primary protagonist for this movie as a clear cinematic character reference. "
+                       "One subject, unobstructed face, visible hairstyle and distinctive wardrobe, three-quarter portrait. "
+                       "Choose and establish a coherent visual rendering style and palette for the entire movie. "
+                       f"Movie plot: {state['plot']} First shot: {first['visual_prompt']}. "
+                       f"Lighting style: {first['lighting_cue']}.")
+        graph = copy.deepcopy(anchor["workflow"])
+        config = anchor["config"]
+        graph[config["prompt_node"]]["inputs"][config["prompt_input"]] = description
+        # Keep every literal sampler seed in the anchor graph fixed too.
+        for node in graph.values():
+            for key, value in list(node.get("inputs", {}).items()):
+                if key in {"seed", "noise_seed"} and type(value) is int:
+                    node["inputs"][key] = anchor["seed"]
+        graph[config["seed_node"]]["inputs"][config["seed_input"]] = anchor["seed"]
+        while anchor.get("attempts", 0) < ATTEMPTS or anchor.get("status") in {"submitting", "submitted"}:
+            if anchor.get("status") not in {"submitting", "submitted"}:
+                attempt = anchor.get("attempts", 0) + 1
+                anchor.update(attempts=attempt, status="submitting",
+                              marker=anchor.get("reconcile_marker") or f"{state['job_id']}:anchor:{attempt}",
+                              prompt_id=anchor.get("retry_prompt_id"))
+                self.store.save()
+            prompt_id = anchor.get("prompt_id")
+            try:
+                if not prompt_id:
+                    prompt_id = client.reconcile(anchor["marker"]) or client.submit_graph(graph, anchor["marker"])
+                anchor.update(prompt_id=prompt_id, status="submitted")
+                self.store.save()
+                source = client.wait(prompt_id, self.notice, output_node=config["output_node"], kind="image")
+                candidate = cached.with_name("master_character.candidate.png")
+                save_anchor_png(source, candidate)
+                checksum = digest(candidate)
+                if expected_hash and checksum != expected_hash and any(s["status"] == "completed" for s in state["shots"]):
+                    raise RuntimeError("Original anchor could not be recovered exactly; refusing to change identity mid-movie")
+                # Preserve a private durable copy before exposing the fixed alias.
+                atomic_bytes(cached, candidate.read_bytes())
+                atomic_bytes(alias, cached.read_bytes())
+                anchor.update(status="ready", image_path=str(cached), image_sha256=checksum,
+                              description=description, completed_at=utc())
+                state["reference"] = str(cached)
+                self.store.save()
+                self.notice(f"Auto-Character master saved: {alias}. All shots reuse this anchor and locked seed.")
+                return cached
+            except Exception as exc:
+                anchor.update(status="retry", last_error=type(exc).__name__,
+                              reconcile_marker=anchor["marker"] if not prompt_id else None,
+                              retry_prompt_id=prompt_id if not isinstance(exc, ValueError) else None)
+                self.store.save()
+                self.notice(f"Master anchor attempt {anchor['attempts']}/3 failed ({type(exc).__name__}).")
+                if anchor["attempts"] < ATTEMPTS:
+                    time.sleep(2 ** anchor["attempts"])
+        raise RuntimeError("Master anchor generation exhausted three attempts; no movie shots were rendered")
 
     def render_shot(self, client: ComfyClient, shot: dict[str, Any], reference: str) -> Path | None:
         """Persist every attempt before submitting. Reuse IDs after network errors."""
@@ -821,15 +1240,13 @@ class Studio:
     def backup_final_movie(self, final: Path) -> None:
         """Optional post-processing: errors are persisted/logged, never re-raised.
 
-        Once all attempts finish, teardown runs even if backup failed. The local
-        MP4 and manifest remain on the instance's persistent disk for recovery.
+        Failed delivery retains the local movie and checkpoint for retry. GPU
+        shutdown is gated on verified delivery when a backup is configured.
         """
         state = self.store.data
         cloud = state.setdefault("cloud", {"provider": "None"})
-        if cloud.get("status") in {"verified", "error"}:
-            self.notice(f"Cloud backup {cloud['status']}: "
-                        + ("checksum already verified." if cloud["status"] == "verified"
-                           else "configuration/upload failed; continuing to teardown."))
+        if cloud.get("status") == "verified" and state.get("upload_receipt", {}).get("verified_at"):
+            self.notice("Cloud backup verified: checksum already verified.")
             return
         if not cloud_enabled(cloud):
             cloud.update(status="skipped", reason="Provider None or destination/credentials missing")
@@ -859,7 +1276,7 @@ class Studio:
             cloud.update(status="error", error=type(exc).__name__, error_at=utc())
             self.store.save()
             self.notice(f"Cloud backup ERROR ({type(exc).__name__}): all attempts finished. "
-                        "Local movie retained; continuing to automatic shutdown.")
+                        "Local movie retained; GPU shutdown withheld until delivery succeeds.")
 
     def complete_movie(self, final: Path) -> None:
         state = self.store.data
@@ -899,7 +1316,8 @@ class Studio:
                 stage = "storyboard planning"
                 shots = plan_shots(state["plot"], state["shot_count"], self.notice)
                 for shot in shots:
-                    shot.update(status="pending", attempts=0, seed=uuid.uuid4().int % (2**63))
+                    shot.update(status="pending", attempts=0,
+                                seed=state.get("master_seed", uuid.uuid4().int % (2**63)))
                 with self.store.lock:
                     state["shots"] = shots
                     state["status"] = "rendering"
@@ -918,7 +1336,8 @@ class Studio:
             try:
                 remaining = [s for s in state["shots"] if s["status"] not in {"completed", "failed"}]
                 if remaining:
-                    reference = retry(lambda: client.upload(Path(state["reference"]), state["job_id"]),
+                    master = self.ensure_master_anchor(client)
+                    reference = retry(lambda: client.upload(master, state["job_id"]),
                                       "Reference image upload", self.notice)
                     for shot in remaining:
                         if self.assembly_error:
@@ -972,20 +1391,32 @@ class Studio:
                 work.put(None)
                 consumer.join()
             if final_ready:
-                try:
-                    self.teardown()
-                except Exception as exc:
-                    self.notice(f"Automatic shutdown ERROR ({type(exc).__name__}): check CONTAINER_ID, "
-                                "vastai CLI credentials, and shutdown.log. Movie remains saved locally.")
+                cloud = self.store.data.get("cloud", {})
+                if cloud.get("status") == "error":
+                    self.notice("Automatic shutdown withheld: cloud delivery is not verified. "
+                                "Attach / Resume Checkpoint retries delivery without rendering again.")
                     with self.store.lock:
-                        self.store.data.update(status="shutdown_error", shutdown_error=type(exc).__name__)
+                        self.store.data["status"] = "backup_error"
                         self.store.save()
+                else:
+                    try:
+                        self.teardown()
+                    except Exception as exc:
+                        self.notice(f"Automatic shutdown ERROR ({type(exc).__name__}): check CONTAINER_ID, "
+                                    "vastai CLI credentials, and shutdown.log. Movie remains saved locally.")
+                        with self.store.lock:
+                            self.store.data.update(status="shutdown_error", shutdown_error=type(exc).__name__)
+                            self.store.save()
 
     def teardown(self) -> None:
         state = self.store.data
         final = Path(state.get("final_file", str(self.root / "final_movie.mp4")))
         if not state.get("movie_ready") or not final.is_file() or digest(final) != state.get("final_sha256"):
             raise RuntimeError("Refusing shutdown before a verified local final movie exists")
+        cloud = state.get("cloud", {})
+        if cloud.get("provider") in {"Google Drive", "Dropbox"} and cloud.get("status") != "skipped":
+            if cloud.get("status") != "verified" or not state.get("upload_receipt", {}).get("verified_at"):
+                raise RuntimeError("Refusing shutdown until configured cloud backup is checksum verified")
         instance = validate_shutdown()
         self.notice(f"Safe teardown started at {utc()}; GPU stop scheduled in 10 seconds.")
         with self.store.lock:
@@ -1024,6 +1455,25 @@ def validate_shutdown() -> str:
 
 def build_app(studio: Studio) -> Any:
     import gradio as gr
+    oauth = GoogleDriveOAuth(studio.root)
+
+    def begin_google(owner: str) -> tuple[str, str, str]:
+        try:
+            url = oauth.begin(owner)
+            link = (f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">'
+                    '🔑 Continue to Google Drive sign-in</a>')
+            return link, "", "Open the Google link, grant permission, then click Complete Google Sign-in."
+        except Exception as exc:
+            detail = str(exc) if type(exc) is ValueError else f"Sign-in setup failed ({type(exc).__name__})."
+            return "", "", detail + " Check GOOGLE_OAUTH_CLIENT_FILE and google-auth-oauthlib."
+
+    def finish_google(owner: str, code: str) -> tuple[str, str]:
+        try:
+            oauth.finish(owner, code)
+            return "", "Google Drive connected. Offline access is ready for automatic movie upload."
+        except Exception as exc:
+            detail = str(exc) if type(exc) is ValueError else f"Google token exchange failed ({type(exc).__name__})."
+            return "", detail + " Start sign-in again if the code expired."
 
     def monitor() -> Iterator[tuple[Any, str, Any, str]]:
         cursor = 0
@@ -1050,10 +1500,16 @@ def build_app(studio: Studio) -> Any:
                 break
             time.sleep(0.5)
 
-    def start(plot: str, image: str, minutes: float, provider: str,
-              destination: str, secret: str) -> Iterator[Any]:
+    def start(plot: str, image: str | None, minutes: float, provider: str,
+              destination: str, secret: str, owner: str) -> Iterator[Any]:
         try:
-            studio.start(plot, image, minutes, provider, destination, secret)
+            google_token = oauth.serialized_credentials(owner) if provider == "Google Drive" else ""
+            # Resuming an existing job uses its encrypted checkpoint credentials.
+            resuming = studio.store.data and studio.store.data.get("status") not in TERMINAL
+            if provider == "Google Drive" and not google_token and not resuming:
+                raise ValueError("Sign in with Google Drive and complete sign-in before starting a Drive-backed movie.")
+            studio.start(plot, image, minutes, provider, destination,
+                         secret if provider == "Dropbox" else "", google_credentials=google_token)
         except Exception as exc:
             # Validation errors contain no OAuth payloads; never surface provider exceptions.
             if isinstance(exc, (ValueError, FileNotFoundError)):
@@ -1062,23 +1518,40 @@ def build_app(studio: Studio) -> Any:
         yield from monitor()
 
     with gr.Blocks(title="Autonomous AI Movie Studio") as app:
+        owner = gr.State(value=lambda: secrets.token_urlsafe(32), time_to_live=86400,
+                         delete_callback=oauth.forget)
         gr.Markdown("# Autonomous AI Movie Studio\nPersistent production · Progressive playback · Optional cloud backup")
         with gr.Row():
             with gr.Column(scale=2):
                 plot = gr.Textbox(label="Movie plot / storyboard", lines=8)
-                image = gr.Image(label="Character reference", type="filepath", sources=["upload"])
+                # gr.Image already accepts None; modern Gradio has no optional=True argument.
+                image = gr.Image(label="Character reference (optional — leave blank for Auto-Character Mode)",
+                                 value=None, type="filepath", sources=["upload"])
+                gr.Markdown("No image? The studio generates one master character from Shot 1, then reuses it "
+                            "with locked seeds for every clip. Your video workflow must connect the master "
+                            "image loader to its IP-Adapter, FaceID, or other identity-conditioning nodes. "
+                            "This reduces drift; generated character consistency is not guaranteed.")
                 minutes = gr.Slider(1, 60, value=1, step=1, label="Target duration (minutes)")
                 with gr.Accordion("📦 Cloud Storage Backup (Optional, Recommended)", open=False):
                     provider = gr.Dropdown(["None", "Google Drive", "Dropbox"], value="None", label="Cloud Provider")
                     destination = gr.Textbox(label="Cloud Destination Folder ID / Path",
-                                             placeholder="Drive folder ID, or Dropbox /Movies (use / for Dropbox root)")
-                    secret = gr.Textbox(label="API Access Token / Service Account JSON", type="password",
-                                        placeholder="Optional; token, service-account JSON, or refreshable OAuth JSON")
-                    gr.Markdown("Leave provider as None or settings empty to skip backup. "
-                                "A configured STUDIO_CREDENTIALS_FILE can supply credentials. "
-                                "Refreshable OAuth credentials are recommended for long jobs. "
-                                "The final movie is saved locally before backup. Shutdown follows in 10 seconds "
-                                "after backup succeeds, fails, or is skipped.")
+                                             placeholder="Google: blank = My Drive root; Dropbox: /Movies or /")
+                    with gr.Group(visible=False) as google_controls:
+                        google_signin = gr.Button("🔑 Sign in with Google Drive")
+                        google_link = gr.HTML()
+                        google_code = gr.Textbox(label="Enter Google Authorization Code", type="password",
+                            placeholder="Optional after callback; also accepts the full Google return URL")
+                        google_finish = gr.Button("Complete Google Sign-in")
+                        google_status = gr.Textbox(label="Google Drive connection", interactive=False)
+                        gr.Markdown("Sign-in opens Google in a new tab. After permission, return here and complete sign-in. "
+                                    "For a remote GPU, forward callback port 7862 as well as app port 7860 "
+                                    "(or your configured ports). If the return page cannot load, paste its full URL above. "
+                                    "Google OAuth client setup is required once on the server.")
+                    secret = gr.Textbox(label="Dropbox Access Token / OAuth JSON", type="password", visible=False,
+                                        placeholder="Dropbox only; leave blank to use STUDIO_CREDENTIALS_FILE")
+                    gr.Markdown("Provider None disables cloud backup. The final movie is saved locally first. "
+                                "With backup enabled, checksum-verified upload is required before the ten-second GPU stop. "
+                                "Failed uploads retain the movie and checkpoint for retry.")
                 button = gr.Button("Start Autonomous Production", variant="primary")
                 attach = gr.Button("Attach / Resume Checkpoint")
                 gr.Markdown("Setup requires an API workflow and persistent storage. Cloud backup is optional. "
@@ -1090,7 +1563,14 @@ def build_app(studio: Studio) -> Any:
                 console = gr.Textbox(label="Live production console (UTC)", lines=18, max_lines=20, interactive=False)
                 final = gr.File(label="Final movie", interactive=False)
         outputs = [video, console, final, status]
-        button.click(start, [plot, image, minutes, provider, destination, secret], outputs,
+        provider.change(lambda selected: (gr.update(visible=selected == "Google Drive"),
+                                          gr.update(visible=selected == "Dropbox")),
+                        inputs=provider, outputs=[google_controls, secret], queue=False)
+        google_signin.click(begin_google, inputs=owner, outputs=[google_link, google_code, google_status],
+                            concurrency_limit=4)
+        google_finish.click(finish_google, inputs=[owner, google_code], outputs=[google_code, google_status],
+                            concurrency_limit=4)
+        button.click(start, [plot, image, minutes, provider, destination, secret, owner], outputs,
                      concurrency_limit=1, concurrency_id="start_job", trigger_mode="once")
 
         def resume_monitor() -> Iterator[Any]:
@@ -1108,9 +1588,166 @@ def self_test() -> None:
     """Deterministic resilience tests; never contacts a GPU, cloud, or shell."""
     import tempfile
     import unittest
-    from unittest.mock import patch
+    from unittest.mock import Mock, patch
 
     class Tests(unittest.TestCase):
+        def test_auto_anchor_created_once_and_recovered(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                studio = Studio(root, acquire_lock=False)
+                graph, config = anchor_workflow_config({"loader": {
+                    "class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "installed-test.safetensors"}}})
+                studio.store.data = {"schema": 1, "job_id": "test", "folder": tmp, "plot": "A traveler finds a city.",
+                    "shots": [dict(structural_shots("A traveler arrives.", 1)[0], status="pending")],
+                    "comfy": {"input_dir": str(root / "input"), "output_dir": str(root / "output")},
+                    "anchor": {"mode": "auto", "seed": 123, "status": "pending", "attempts": 0,
+                               "workflow": graph, "config": config}}
+                source = root / "source.png"
+                source.write_bytes(b"generated-image")
+                submitted = []
+
+                class Client:
+                    def reconcile(self, marker):
+                        return None
+
+                    def submit_graph(self, graph, marker):
+                        submitted.append(graph)
+                        return "anchor-prompt"
+
+                    def wait(self, prompt_id, notice, **kwargs):
+                        self.kind = kwargs["kind"]
+                        return source
+
+                client = Client()
+                with patch(__name__ + ".save_anchor_png", side_effect=lambda src, dst: atomic_bytes(dst, b"master-pixels")):
+                    anchor = studio.ensure_master_anchor(client)
+                self.assertEqual(client.kind, "image")
+                self.assertEqual(submitted[0][config["seed_node"]]["inputs"][config["seed_input"]], 123)
+                alias = root / "input" / "auto_master_character.png"
+                self.assertEqual(alias.read_bytes(), anchor.read_bytes())
+                # Simulate another ComfyUI application overwriting the convenience alias.
+                alias.write_bytes(b"changed")
+                recovered = Studio(root, acquire_lock=False)
+                self.assertEqual(recovered.ensure_master_anchor(client), anchor)
+                self.assertEqual(alias.read_bytes(), b"master-pixels")
+                anchor.write_bytes(b"corrupted private copy")
+                recovered.ensure_master_anchor(client)
+                self.assertEqual(anchor.read_bytes(), b"master-pixels")
+                self.assertEqual(len(submitted), 1)
+
+        def test_uploaded_reference_bypasses_auto_generation(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                image = Path(tmp) / "ref.png"
+                image.write_bytes(b"uploaded-image")
+                with patch(__name__ + ".workflow_config", return_value=({}, {})), \
+                     patch(__name__ + ".anchor_workflow_config") as auto_config, patch.object(studio, "launch"):
+                    studio.start("A traveler arrives.", str(image), 1, "None", "", "")
+                client = Mock()
+                reference = studio.ensure_master_anchor(client)
+                self.assertEqual(reference.read_bytes(), b"uploaded-image")
+                auto_config.assert_not_called()
+                client.submit_graph.assert_not_called()
+
+        def test_optional_image_starts_auto_mode(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                with patch(__name__ + ".workflow_config", return_value=({}, {})), \
+                     patch(__name__ + ".anchor_workflow_config", return_value=({"template": {}}, {})), \
+                     patch.object(studio, "launch"):
+                    studio.start("A traveler arrives.", None, 1, "None", "", "")
+                self.assertIsNone(studio.store.data["reference"])
+                self.assertEqual(studio.store.data["anchor"]["mode"], "auto")
+                self.assertEqual(studio.store.data["anchor"]["seed"], studio.store.data["master_seed"])
+
+        def test_all_image_loaders_and_seeds_receive_same_anchor(self):
+            client = ComfyClient.__new__(ComfyClient)
+            client.config = {"prompt_node": "6", "prompt_input": "text", "image_node": "10", "image_input": "image",
+                "seed_node": "3", "seed_input": "seed", "image_bindings": [{"node": "11", "input": "image"}],
+                "seed_bindings": [{"node": "12", "input": "noise_seed"}]}
+            graphs = []
+
+            def request(method, route, **kwargs):
+                graphs.append(kwargs["json"]["prompt"])
+                return {"prompt_id": "clip"}
+
+            client.request = request
+            original = {"6": {"inputs": {"text": "original"}}, "10": {"inputs": {"image": "old"}},
+                        "11": {"inputs": {"image": "old"}}, "3": {"inputs": {"seed": 0}},
+                        "12": {"inputs": {"noise_seed": 0}}}
+            for shot in structural_shots("A traveler arrives.", 2):
+                client.submit(original, dict(shot, seed=123), "studio_job_master.png", "marker")
+            for graph in graphs:
+                self.assertEqual(graph["10"]["inputs"]["image"], "studio_job_master.png")
+                self.assertEqual(graph["11"]["inputs"]["image"], "studio_job_master.png")
+                self.assertEqual(graph["3"]["inputs"]["seed"], 123)
+                self.assertEqual(graph["12"]["inputs"]["noise_seed"], 123)
+            self.assertEqual(original["10"]["inputs"]["image"], "old")
+
+        def oauth_fixture(self, tmp):
+            from types import SimpleNamespace
+            manager = GoogleDriveOAuth(Path(tmp))
+            state = secrets.token_urlsafe(32)
+            flow = SimpleNamespace(
+                authorization_url=lambda **kwargs: ("https://accounts.google.com/o/oauth2/v2/auth?state=" + state, state),
+                fetch_token=Mock(), credentials=SimpleNamespace(refresh_token="fake-refresh",
+                    to_json=lambda: json.dumps({"token": "fake-access", "refresh_token": "fake-refresh"})))
+            manager._new_flow = lambda: flow
+            manager._ensure_server = lambda: None
+            return manager, flow, state
+
+        def test_google_callback_and_session_isolation(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                manager, flow, state = self.oauth_fixture(tmp)
+                manager.begin("alice")
+                status, _, _ = manager.capture_callback(manager.CALLBACK_PATH + "?state=" + state + "&code=accepted")
+                self.assertEqual(status, 200)
+                manager.finish("alice", "accepted")
+                flow.fetch_token.assert_called_once_with(code="accepted", timeout=60)
+                self.assertTrue(manager.serialized_credentials("alice"))
+                self.assertEqual(manager.serialized_credentials("bob"), "")
+                self.assertFalse((Path(tmp) / "credentials.json").exists())
+                with self.assertRaises(ValueError):
+                    manager.finish("alice", "accepted")  # No replay of a used code.
+                manager.forget("alice")
+                self.assertEqual(manager.serialized_credentials("alice"), "")
+
+        def test_google_unvalidated_code_is_rejected(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                manager, flow, state = self.oauth_fixture(tmp)
+                manager.begin("alice")
+                with self.assertRaises(ValueError):
+                    manager.finish("alice", "unvalidated-code")
+                status, _, _ = manager.capture_callback(manager.CALLBACK_PATH + "?state=forged&code=accepted")
+                self.assertEqual(status, 400)
+                with self.assertRaises(ValueError):
+                    manager.finish("bob", manager.redirect_uri + "?state=" + state + "&code=accepted")
+                flow.fetch_token.assert_not_called()
+
+        def test_google_full_return_url_and_expiry(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                manager, flow, state = self.oauth_fixture(tmp)
+                manager.begin("alice")
+                manager.finish("alice", manager.redirect_uri + "?state=" + state + "&code=accepted")
+                flow.fetch_token.assert_called_once()
+                manager.begin("alice")
+                manager.pending[state]["created"] -= manager.TTL + 1
+                status, _, _ = manager.capture_callback(manager.CALLBACK_PATH + "?state=" + state + "&code=accepted")
+                self.assertEqual(status, 400)
+
+        def test_google_root_destination_from_session(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                image = Path(tmp) / "ref.png"
+                image.write_bytes(b"reference")
+                with patch(__name__ + ".workflow_config", return_value=({}, {})), \
+                     patch.object(studio, "launch"), \
+                     patch(__name__ + ".credential_spec", return_value={"encrypted": "fake"}):
+                    studio.start("A traveler arrives.", str(image), 1, "Google Drive", "", "",
+                                 google_credentials='{"refresh_token":"fake"}')
+                self.assertEqual(studio.store.data["cloud"]["destination"], "root")
+                self.assertTrue(cloud_enabled(studio.store.data["cloud"]))
+
         def test_atomic_checkpoint(self):
             with tempfile.TemporaryDirectory() as tmp:
                 store = StateStore(Path(tmp))
@@ -1289,16 +1926,17 @@ def self_test() -> None:
         def test_pipeline_failure_isolation(self):
             from contextlib import ExitStack
             from types import SimpleNamespace
-            for outcome in ("verified", "cloud_error", "none", "empty_credentials", "assembly_error"):
+            for outcome in ("verified", "cloud_error", "none", "empty_credentials", "assembly_error", "planned"):
                 with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as tmp:
                     studio = Studio(Path(tmp), acquire_lock=False)
                     shots = structural_shots("A traveler arrives.", 2)
                     for shot in shots:
                         shot.update(status="pending", attempts=0)
                     studio.store.data = {"schema": 1, "job_id": "test", "folder": tmp,
-                        "shot_count": 2, "shots": shots, "workflow": {}, "comfy": {},
+                        "shot_count": 2, "shots": [] if outcome == "planned" else shots,
+                        "plot": "A traveler arrives.", "master_seed": 246, "workflow": {}, "comfy": {},
                         "reference": "ref", "media": {}, "shutdown": True,
-                        "cloud": {"provider": "None" if outcome == "none" else "Dropbox",
+                        "cloud": {"provider": "None" if outcome in {"none", "planned"} else "Dropbox",
                                   "destination": "/Movies",
                                   "credentials": {} if outcome == "empty_credentials" else {"file": "mock"}},
                         "master_shot_ids": []}
@@ -1348,6 +1986,7 @@ def self_test() -> None:
                     upload_calls = []
                     with ExitStack() as stack:
                         for target, value in [("ComfyClient", Client), ("credentials", lambda _: {}),
+                            ("plan_shots", lambda plot, count, notice: structural_shots(plot, count)),
                             ("cloud_preflight", lambda *args: None), ("probe", lambda _: 5),
                             ("normalize", fake_normalize), ("preview", fake_preview), ("upload_cloud", fake_upload)]:
                             stack.enter_context(patch(__name__ + "." + target, value))
@@ -1356,18 +1995,25 @@ def self_test() -> None:
                         stack.enter_context(patch.object(studio, "assemble", fake_assemble))
                         teardown = stack.enter_context(patch.object(studio, "teardown"))
                         studio.pipeline()
+                        shots = studio.store.data["shots"]
+                        if outcome == "planned":
+                            self.assertEqual([s["seed"] for s in shots], [246, 246])
                         if outcome != "assembly_error":
-                            teardown.assert_called_once()
+                            if outcome == "cloud_error":
+                                teardown.assert_not_called()
+                                self.assertEqual(studio.store.data["status"], "backup_error")
+                            else:
+                                teardown.assert_called_once()
                             self.assertEqual(shots[0]["status"], "failed")
                             self.assertEqual(shots[1]["status"], "completed")
                             self.assertTrue(studio.store.data["partial"])
                             self.assertEqual(studio.store.data["cloud"]["status"],
                                              {"verified": "verified", "cloud_error": "error",
-                                              "none": "skipped", "empty_credentials": "skipped"}[outcome])
+                                              "none": "skipped", "empty_credentials": "skipped", "planned": "skipped"}[outcome])
                             self.assertTrue(studio.store.data["movie_ready"])
                             self.assertEqual(len(upload_calls),
                                              {"verified": 1, "cloud_error": 3,
-                                              "none": 0, "empty_credentials": 0}[outcome])
+                                              "none": 0, "empty_credentials": 0, "planned": 0}[outcome])
                         else:
                             teardown.assert_not_called()
                             self.assertEqual(studio.store.data["status"], "recoverable_error")
@@ -1405,6 +2051,7 @@ def main() -> None:
         server_port=int(os.getenv("STUDIO_PORT", "7860")),
         auth=(username, password) if username else None,
         blocked_paths=[str(root / "state.json"), str(root / "studio.log"), str(root / "credentials.key"),
+                       str(Path(os.getenv("GOOGLE_OAUTH_CLIENT_FILE", str(root / "google_oauth_client.json"))).resolve()),
                        str(Path(os.getenv("STUDIO_CREDENTIALS_FILE", str(root / ".credentials"))).resolve())])
 
 

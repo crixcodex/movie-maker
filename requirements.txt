@@ -4,6 +4,7 @@ requests>=2.32.4,<3
 cryptography>=44,<51
 google-api-python-client>=2.160,<3
 google-auth-httplib2>=0.2,<1
+google-auth-oauthlib>=1.2,<2
 dropbox>=12.0,<13
 
 # System dependencies (not pip packages): ffmpeg and ffprobe.
