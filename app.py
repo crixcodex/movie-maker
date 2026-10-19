@@ -68,8 +68,18 @@ Local OpenAI-compatible LLM: LLM_URL=http://127.0.0.1:11434/v1
   LLM_MODEL=your-local-model  (unset means deterministic structural planning)
   LLM_FAILURE_POLICY=structural (or fail); LLM_BATCH_SIZE=12
 Media: MOVIE_WIDTH=1920 MOVIE_HEIGHT=1080 MOVIE_FPS=24
-  Workflow must generate five-second silent video clips. Audio is intentionally
-  removed to keep every segment compatible. Upscaling cannot create detail.
+  Workflow must generate five-second video clips. Source audio is replaced with
+  context-selected procedural sound layers (rain/wind/water/fire/city/engines/
+  footsteps), mixed to stereo 48 kHz. This is an ambient fallback, not a neural
+  Foley model, speech generator, or frame-aligned event detector.
+  New movies default to 2.39:1 center crop (1920x804 at width 1920), subtle luma
+  grain, restrained teal/orange grading, and mild spatial/temporal denoising.
+  MOVIE_CRF=16 POST_THREADS=4; H.264 medium/grain, stereo AAC 320k, 48 kHz.
+  Set MOVIE_WIDTH=3840 for a 3840x1606 scope export (more CPU/storage).
+  Upscaling cannot create missing source detail. Both sound and cinematic finish
+  can be disabled in the GUI. Checkpoints freeze their finishing profile; legacy
+  jobs stay silent/non-graded. PCM segments are concatenated before master AAC
+  encoding to prevent cumulative encoder-delay drift across long movies.
 
 Cloud backup is optional (provider None by default). Google sign-in setup:
   Enable the Google Drive API in your Google Cloud project, configure its OAuth
@@ -99,6 +109,7 @@ Optional STUDIO_USER and STUDIO_PASSWORD enable Gradio authentication.
 
 Run: python app.py
 Tests (no third-party dependencies): python app.py --self-test
+Real FFmpeg integration test (no GPU/cloud/shutdown): python app.py --media-self-test
 
 Operational contract:
 * One process owns one workspace, guarded by an OS advisory file lock.
@@ -143,6 +154,7 @@ import threading
 import time
 import traceback
 import uuid
+import wave
 from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -389,26 +401,201 @@ def probe(path: Path) -> float:
     return seconds
 
 
-def normalize(source: Path, target: Path, media: dict[str, int]) -> None:
+def validate_finished_media(path: Path, seconds: float, media: dict[str, Any]) -> dict[str, Any]:
+    """Check both streams before cloud delivery or the GPU shutdown gate."""
+    metadata = json.loads(run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)]))
+    streams = metadata.get("streams", [])
+    video = next((s for s in streams if s.get("codec_type") == "video"), {})
+    settings = media["postproduction"]
+    height = (max(2, 2 * round(media["width"] / settings["aspect"] / 2))
+              if settings["cinematic"] else media["height"])
+    if (video.get("codec_name") != "h264" or video.get("width") != media["width"]
+            or video.get("height") != height or video.get("pix_fmt") != "yuv420p"):
+        raise RuntimeError("Finished video codec or dimensions do not match the frozen movie profile")
+    if abs(float(video.get("duration", 0)) - seconds) > 0.1:
+        raise RuntimeError("Finished video timeline duration is invalid")
+    audio = [s for s in streams if s.get("codec_type") == "audio"]
+    if settings["audio"]:
+        if (len(audio) != 1 or audio[0].get("codec_name") != "aac"
+                or int(audio[0].get("sample_rate", 0)) != 48000 or audio[0].get("channels") != 2
+                or abs(float(audio[0].get("duration", 0)) - seconds) > 0.1
+                or abs(float(audio[0].get("start_time", 0))) > 0.05):
+            raise RuntimeError("Finished AAC soundtrack is missing or out of sync")
+    elif audio:
+        raise RuntimeError("Unexpected soundtrack in an audio-disabled movie")
+    return metadata
+
+
+def postproduction_config(audio: bool = True, cinematic: bool = True) -> dict[str, Any]:
+    """Freeze finishing parameters per movie; legacy checkpoints remain unchanged."""
+    crf = int(os.getenv("MOVIE_CRF", "16"))
+    threads = int(os.getenv("POST_THREADS", "4"))
+    if not 12 <= crf <= 23 or not 1 <= threads <= 32:
+        raise ValueError("MOVIE_CRF must be 12–23 and POST_THREADS must be 1–32")
+    return {"version": 1, "audio": bool(audio), "cinematic": bool(cinematic),
+            "aspect": 2.39, "grain": 3, "crf": crf, "preset": "medium", "threads": threads,
+            "audio_rate": 48000, "audio_bitrate": "320k", "audio_channels": 2,
+            "loudness_lufs": -23, "true_peak_db": -2}
+
+
+def audio_plan(shot: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic procedural fallback, not an event-aligned neural Foley model.
+
+    Only the scene/action/lighting fields select sounds: identity/style anchors
+    and user text never become FFmpeg expressions or executable commands.
+    """
+    text = " ".join(str(shot.get(key, "")) for key in
+                    ("action_prompt", "visual_prompt", "lighting_cue")).lower()
+    vocabulary = {
+        "rain": r"\b(rain\w*|drizzl\w*|downpour|storm\w*)\b",
+        "wind": r"\b(wind\w*|breeze|gust\w*|blizzard|desert)\b",
+        "mechanical": r"\b(engine\w*|motor\w*|machin\w*|spaceship|spacecraft|factory|industrial|generator|robot\w*|train|subway)\b",
+        "water": r"\b(ocean|sea|surf|wave\w*|river|stream|waterfall|beach)\b",
+        "fire": r"\b(fire|flame\w*|campfire|burning)\b",
+        "city": r"\b(city|street\w*|traffic|urban|downtown|highway)\b",
+        "footsteps": r"\b(walk\w*|footstep\w*|running|runs|run|stroll\w*|hiking)\b",
+    }
+    cues = [name for name, pattern in vocabulary.items() if re.search(pattern, text)]
+    seed = int.from_bytes(hashlib.sha256(
+        f"{shot.get('seed', 0)}:{shot.get('shot_id', 0)}:sound-v1".encode()).digest()[:4], "big") % 2147483647
+    return {"version": 1, "mode": "procedural", "cues": cues or ["room_tone"], "seed": seed}
+
+
+def sound_layers(plan: dict[str, Any]) -> list[str]:
+    """Return trusted lavfi sources. Each layer has its own deterministic seed."""
+    seed = plan["seed"]
+    def noise(color: str, level: float, offset: int) -> str:
+        return f"anoisesrc=r=48000:d=5:c={color}:a={level}:s={(seed + offset) % 2147483647}"
+    # A quiet bed always prevents an empty mix. Additional sources stay distinct
+    # until mixing so weather, low mechanical tones and movement can coexist.
+    layers = [noise("pink", 0.035, 0) + ",highpass=f=80,lowpass=f=650"]
+    for cue in plan["cues"]:
+        if cue == "rain":
+            layers.append(noise("white", 0.18, 1) + ",highpass=f=650,lowpass=f=11000")
+        elif cue == "wind":
+            layers.append(noise("pink", 0.26, 2) + ",highpass=f=50,lowpass=f=1700,tremolo=f=0.35:d=0.65")
+        elif cue == "mechanical":
+            layers.extend(["sine=f=55:r=48000:d=5,volume=0.65,tremolo=f=2.3:d=0.12",
+                           "sine=f=110:r=48000:d=5,volume=0.22",
+                           noise("brown", 0.16, 3) + ",highpass=f=35,lowpass=f=420"])
+        elif cue == "water":
+            layers.append(noise("pink", 0.24, 4) + ",highpass=f=120,lowpass=f=5500,tremolo=f=0.22:d=0.8")
+        elif cue == "fire":
+            layers.append(noise("white", 0.16, 5) + ",highpass=f=180,lowpass=f=4500,tremolo=f=11:d=0.85")
+        elif cue == "city":
+            layers.append(noise("brown", 0.22, 6) + ",highpass=f=55,lowpass=f=1200,tremolo=f=0.7:d=0.35")
+        elif cue == "footsteps":
+            layers.append(noise("brown", 0.35, 7) +
+                          r",highpass=f=85,lowpass=f=1100,volume='if(lt(mod(t,0.62),0.085),0.75,0.015)':eval=frame")
+    return layers
+
+
+def validate_pcm(path: Path) -> None:
+    with wave.open(str(path), "rb") as audio:
+        if (audio.getframerate(), audio.getnchannels(), audio.getsampwidth(), audio.getnframes()) != (48000, 2, 2, 240000):
+            raise ValueError("Sound segment must contain exactly five seconds of stereo 48 kHz PCM")
+
+
+def generate_sound(shot: dict[str, Any], target: Path, settings: dict[str, Any],
+                   notice: Callable[[str], None]) -> dict[str, Any]:
+    plan = audio_plan(shot)
+    sources = sound_layers(plan)
+    notice(f"Shot {shot['shot_id']}: sound design — {', '.join(plan['cues'])}; mixing {len(sources)} layers.")
+    args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-filter_complex_threads", "1"]
+    for source in sources:
+        args += ["-f", "lavfi", "-i", source]
+    labels = []
+    filters = []
+    for index in range(len(sources)):
+        # Modest asymmetric levels give the layers width without phase reversal.
+        left, right = ((0.90, 1.0) if index % 2 else (1.0, 0.90))
+        filters.append(f"[{index}:a]pan=stereo|c0={left}*c0|c1={right}*c0[layer{index}]")
+        labels.append(f"[layer{index}]")
+    filters.append("".join(labels) + f"amix=inputs={len(sources)}:duration=longest:normalize=0,"
+        f"loudnorm=I={settings['loudness_lufs']}:TP={settings['true_peak_db']}:LRA=7,"
+        "aresample=48000,afade=t=in:st=0:d=0.05,afade=t=out:st=4.88:d=0.12,"
+        "apad=whole_len=240000,atrim=end_sample=240000,asetpts=N/SR/TB[mix]")
+    pending = target.with_suffix(".pending.wav")
+    args += ["-filter_complex", ";".join(filters), "-map", "[mix]", "-c:a", "pcm_s16le",
+             "-ar", "48000", "-ac", "2", str(pending)]
+    # The procedural engine needs no model, credentials, network or license.
+    # A deterministic clean room-tone retry is the fallback if a cue fails.
+    try:
+        run(args, timeout=120)
+        validate_pcm(pending)
+    except Exception as exc:
+        notice(f"Shot {shot['shot_id']}: layered sound failed ({type(exc).__name__}); using a clean ambient bed.")
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+             f"anoisesrc=r=48000:d=5:c=pink:a=0.05:s={plan['seed']}",
+             "-af", "highpass=f=80,lowpass=f=700,afade=t=in:d=0.05,afade=t=out:st=4.88:d=0.12",
+             "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-t", "5", str(pending)], timeout=120)
+        validate_pcm(pending)
+        plan["fallback"] = "ambient_bed"
+    with pending.open("r+b") as handle:
+        os.fsync(handle.fileno())
+    os.replace(pending, target)
+    return plan
+
+
+def video_filters(media: dict[str, Any], seed: int = 0) -> str:
+    width, height, fps = media["width"], media["height"], media["fps"]
+    settings = media.get("postproduction", {})
+    if settings.get("cinematic"):
+        scope_height = max(2, 2 * round(width / settings["aspect"] / 2))
+        filters = (f"scale={width}:{scope_height}:force_original_aspect_ratio=increase:flags=lanczos,"
+                   f"crop={width}:{scope_height},setsar=1,fps={fps},"
+                   "tpad=stop_mode=clone:stop_duration=0.3,"
+                   "hqdn3d=0.6:0.4:1.2:0.8,"
+                   "curves=master='0/0 0.18/0.14 0.5/0.51 0.82/0.87 1/1',"
+                   "colorbalance=rs=-0.02:gs=0.008:bs=0.025:rh=0.025:gh=0.008:bh=-0.018:pl=1,"
+                   "eq=saturation=1.04,"
+                   f"noise=c0s={settings['grain']}:c0f=t+u:c0_seed={seed % 2147483647},format=yuv420p")
+    else:
+        filters = (f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
+                   f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
+                   "tpad=stop_mode=clone:stop_duration=0.3")
+    return filters
+
+
+def normalize(source: Path, target: Path, media: dict[str, Any],
+              shot: dict[str, Any] | None = None,
+              notice: Callable[[str], None] = lambda _: None) -> dict[str, Any]:
     seconds = probe(source)
     if abs(seconds - 5) > 0.25:
         raise ValueError(f"Workflow generated {seconds:.2f}s; expected five seconds")
-    width, height, fps = media["width"], media["height"], media["fps"]
+    fps = media["fps"]
+    settings = media.get("postproduction", {})
+    details: dict[str, Any] = {}
+    audio = target.with_suffix(".wav")
+    if settings.get("audio"):
+        if not shot:
+            raise ValueError("Sound design requires the checkpointed shot description")
+        details["audio_plan"] = generate_sound(shot, audio, settings, notice)
+        details["audio_sha256"] = digest(audio)
     temporary = target.with_suffix(".pending.mp4")
     # Pad slightly short source clips so every successful shot is exactly 5s.
-    filters = (f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-               f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
-               "tpad=stop_mode=clone:stop_duration=0.3")
-    run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
-         "-map", "0:v:0", "-an", "-vf", filters, "-t", "5", "-c:v", "libx264",
-         "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-r", str(fps),
-         "-video_track_timescale", "90000", "-movflags", "+faststart", str(temporary)])
+    args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-filter_threads", "2", "-i", str(source)]
+    if settings.get("audio"):
+        args += ["-i", str(audio), "-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac",
+                 "-b:a", settings["audio_bitrate"], "-ar", "48000", "-ac", "2"]
+    else:
+        args += ["-map", "0:v:0", "-an"]
+    args += ["-vf", video_filters(media, (shot or {}).get("seed", 0)), "-t", "5", "-c:v", "libx264",
+             "-threads", str(settings.get("threads", 4)), "-preset", settings.get("preset", "veryfast"),
+             "-crf", str(settings.get("crf", 18)), "-pix_fmt", "yuv420p", "-r", str(fps),
+             "-video_track_timescale", "90000"]
+    if settings:
+        args += ["-tune", "grain" if settings.get("cinematic") else "film", "-profile:v", "high",
+                 "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
+    args += ["-movflags", "+faststart", str(temporary)]
+    run(args)
     if abs(probe(temporary) - 5) > 0.1:
         raise RuntimeError("Normalized shot duration is invalid")
     os.replace(temporary, target)
     with target.open("r+b") as handle:
         os.fsync(handle.fileno())
     fsync_directory(target.parent)
+    return details
 
 
 def preview(clip: Path) -> Path:
@@ -1465,7 +1652,7 @@ class Studio:
 
     def start(self, plot: str, image: str | None, minutes: float, provider: str,
               destination: str, secret: str, shutdown: bool = True,
-              google_credentials: str = "") -> None:
+              google_credentials: str = "", sound_design: bool = True, cinematic: bool = True) -> None:
         with self.guard:
             if self.running():
                 raise ValueError("A movie is already running; attach to the current job")
@@ -1539,7 +1726,8 @@ class Studio:
                 "status": "setting_up" if setup_pending else "planning", "setup_pending": setup_pending,
                 "plot": plot, "shot_count": count, "shots": [],
                 "reference": str(reference) if reference else None, "anchor": anchor, "master_seed": master_seed,
-                "workflow": graph, "comfy": config, "media": {"width": width, "height": height, "fps": fps},
+                "workflow": graph, "comfy": config, "media": {"width": width, "height": height, "fps": fps,
+                    "postproduction": postproduction_config(sound_design, cinematic)},
                 "cloud": cloud, "shutdown": True, "master_shot_ids": []}
             self.store.save()
             with self.live_lock:
@@ -1789,10 +1977,29 @@ class Studio:
         master = self.root / "current_movie_stream.mp4"
         # FFmpeg is a subprocess in this dedicated consumer thread. The producer
         # keeps rendering and UI keeps yielding while this process runs.
-        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "1",
-             "-i", str(playlist), "-c", "copy", "-movflags", "+faststart", str(pending)], timeout=1800)
+        settings = snapshot["media"].get("postproduction", {})
+        args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "1", "-i", str(playlist)]
+        if settings.get("audio"):
+            audio_list = folder / "audio_filelist.txt"
+            for shot in clips:
+                path = folder / f"shot_{shot['shot_id']:04d}.wav"
+                validate_pcm(path)
+                if digest(path) != shot.get("audio_sha256"):
+                    raise RuntimeError(f"Shot {shot['shot_id']} soundtrack failed integrity verification")
+            atomic_bytes(audio_list, "".join(f"file 'shot_{shot['shot_id']:04d}.wav'\n" for shot in clips).encode())
+            # Decode lossless PCM segments and encode AAC once for this entire
+            # master, preventing per-segment AAC priming delays from adding up.
+            args += ["-f", "concat", "-safe", "1", "-i", str(audio_list), "-map", "0:v:0", "-map", "1:a:0",
+                     "-c:v", "copy", "-c:a", "aac", "-b:a", settings["audio_bitrate"], "-ar", "48000", "-ac", "2",
+                     "-af", f"atrim=end_sample={len(clips) * 240000},asetpts=N/SR/TB", "-t", str(len(clips) * 5)]
+        else:
+            args += ["-map", "0:v:0", "-c:v", "copy", "-an"]
+        args += ["-movflags", "+faststart", str(pending)]
+        run(args, timeout=1800)
         if abs(probe(pending) - 5 * len(clips)) > max(0.25, len(clips) * 0.002):
             raise RuntimeError("Master duration verification failed")
+        if settings:
+            validate_finished_media(pending, 5 * len(clips), snapshot["media"])
         with pending.open("r+b") as handle:
             os.fsync(handle.fileno())
         os.replace(pending, master)
@@ -1800,7 +2007,8 @@ class Studio:
         with self.store.lock:
             self.store.data["master_shot_ids"] = [s["shot_id"] for s in clips]
             self.store.save()
-        self.notice(f"Master updated: {len(clips)} completed shots, {len(clips) * 5} seconds.")
+        self.notice(f"Master updated: {len(clips)} completed shots, {len(clips) * 5} seconds"
+                    + (", synchronized stereo AAC soundtrack." if settings.get("audio") else "."))
 
     def consume(self, work: queue.Queue) -> None:
         """Single consumer preserves shot order; failures never kill it silently."""
@@ -1814,14 +2022,21 @@ class Studio:
                     shot, raw = item
                     clip = Path(self.store.data["folder"]) / f"shot_{shot['shot_id']:04d}.mp4"
                     try:
-                        retry(lambda: normalize(raw, clip, self.store.data["media"]),
-                              f"Normalize shot {shot['shot_id']}", self.notice)
+                        media = self.store.data["media"]
+                        if media.get("postproduction"):
+                            self.notice(f"Shot {shot['shot_id']}: cinematic finishing and sound design.")
+                            details = retry(lambda: normalize(raw, clip, media, shot, self.notice),
+                                            f"Finish shot {shot['shot_id']}", self.notice)
+                        else:
+                            # Preserve old checkpoints' silent/non-graded look.
+                            retry(lambda: normalize(raw, clip, media), f"Normalize shot {shot['shot_id']}", self.notice)
+                            details = {}
                         transport = retry(lambda: preview(clip), "Prepare preview", self.notice)
                     except Exception as exc:
                         self.checkpoint_shot(shot, status="failed", last_error=type(exc).__name__)
                         self.notice(f"Shot {shot['shot_id']} media processing failed; skipping.")
                         continue
-                    self.checkpoint_shot(shot, status="completed", clip_sha256=digest(clip), completed_at=utc())
+                    self.checkpoint_shot(shot, status="completed", clip_sha256=digest(clip), completed_at=utc(), **details)
                     public_transport = self.publish_media(transport)
                     with self.live_lock:
                         self.streams.append(str(public_transport))
@@ -1843,9 +2058,14 @@ class Studio:
             if shot["status"] != "completed":
                 continue
             clip = Path(self.store.data["folder"]) / f"shot_{shot['shot_id']:04d}.mp4"
-            if not clip.exists() or digest(clip) != shot.get("clip_sha256"):
-                self.notice(f"Shot {shot['shot_id']} checkpoint file missing/corrupt; recovering output.")
-                self.checkpoint_shot(shot, status="submitted" if shot.get("prompt_id") else "pending", attempts=0)
+            audio = clip.with_suffix(".wav")
+            sound = self.store.data.get("media", {}).get("postproduction", {}).get("audio", False)
+            if (not clip.exists() or digest(clip) != shot.get("clip_sha256")
+                    or (sound and (not audio.is_file() or digest(audio) != shot.get("audio_sha256")))):
+                self.notice(f"Shot {shot['shot_id']} media checkpoint missing/corrupt; recovering output.")
+                raw = clip.with_name(f"raw_{shot['shot_id']:04d}.mp4")
+                reusable = raw.is_file() and digest(raw) == shot.get("raw_sha256")
+                self.checkpoint_shot(shot, status="rendered" if reusable else "submitted" if shot.get("prompt_id") else "pending", attempts=0)
                 continue
             transport = clip.with_suffix(".ts")
             if not transport.exists():
@@ -1905,7 +2125,8 @@ class Studio:
             "job_id": state["job_id"], "completed_shot_ids": state["completed_shot_ids"],
             "failed_shot_ids": state["failed_shot_ids"], "partial": state["partial"],
             "final_sha256": state["final_sha256"], "cloud_status": state["cloud"]["status"],
-            "upload_receipt": state.get("upload_receipt"), "completed_at": state["completed_at"]})
+            "upload_receipt": state.get("upload_receipt"), "completed_at": state["completed_at"],
+            "postproduction": state.get("media", {}).get("postproduction", {"version": 0, "audio": False, "cinematic": False})})
         self.notice(f"Movie processing complete at {state['completed_at']}; "
                     f"cloud backup: {state['cloud']['status']}.")
 
@@ -1958,6 +2179,10 @@ class Studio:
             with self.live_lock:
                 self.streams.clear()
             stage = "shot recovery, rendering, and assembly"
+            finishing = state["media"].get("postproduction", {})
+            if finishing:
+                self.notice(f"Finishing profile: sound={'procedural stereo' if finishing['audio'] else 'off'}, "
+                            f"cinematic scope={'on' if finishing['cinematic'] else 'off'}, H.264 CRF {finishing['crf']}.")
             self.recover_clips()
             consumer = threading.Thread(target=self.consume, args=(work,), name="media-consumer", daemon=False)
             consumer.start()
@@ -2003,6 +2228,8 @@ class Studio:
             shutil.copyfile(self.root / "current_movie_stream.mp4", pending)
             if abs(probe(pending) - len(completed) * 5) > 0.5:
                 raise RuntimeError("Final movie duration is invalid")
+            if state["media"].get("postproduction"):
+                validate_finished_media(pending, len(completed) * 5, state["media"])
             with pending.open("r+b") as handle:
                 os.fsync(handle.fileno())
             os.replace(pending, final)
@@ -2149,7 +2376,7 @@ def build_app(studio: Studio) -> Any:
             time.sleep(0.5)
 
     def start(plot: str, image: str | None, minutes: float, provider: str,
-              destination: str, secret: str, owner: str) -> Iterator[Any]:
+              destination: str, secret: str, owner: str, sound: bool, cinematic: bool) -> Iterator[Any]:
         try:
             google_token = oauth.serialized_credentials(owner) if provider == "Google Drive" else ""
             # Resuming an existing job uses its encrypted checkpoint credentials.
@@ -2157,7 +2384,8 @@ def build_app(studio: Studio) -> Any:
             if provider == "Google Drive" and not google_token and not resuming:
                 studio.notice("Google Drive is not authorized; optional backup will be skipped for this job.")
             studio.start(plot, image, minutes, provider, destination,
-                         secret if provider == "Dropbox" else "", google_credentials=google_token)
+                         secret if provider == "Dropbox" else "", google_credentials=google_token,
+                         sound_design=sound, cinematic=cinematic)
         except Exception as exc:
             # Validation errors contain no OAuth payloads; never surface provider exceptions.
             if isinstance(exc, (ValueError, FileNotFoundError)):
@@ -2180,6 +2408,13 @@ def build_app(studio: Studio) -> Any:
                             "image loader to its IP-Adapter, FaceID, or other identity-conditioning nodes. "
                             "This reduces drift; generated character consistency is not guaranteed.")
                 minutes = gr.Slider(1, 60, value=1, step=1, label="Target duration (minutes)")
+                with gr.Accordion("Sound design & cinematic finishing", open=False):
+                    sound = gr.Checkbox(value=True, label="Automatic ambient sound design (stereo AAC)")
+                    cinematic = gr.Checkbox(value=True, label="Cinematic grade, film grain & 2.39:1 center crop")
+                    gr.Markdown("Sound uses context-selected procedural layers such as rain, wind and mechanical hums. "
+                                "It does not generate dialogue or detect exact on-screen events. "
+                                "The widescreen center crop can trim the top and bottom of the source. "
+                                "Finishing choices are saved with the movie; resumed jobs keep their original settings.")
                 with gr.Accordion("📦 Cloud Storage Backup (Optional, Recommended)", open=False):
                     provider = gr.Dropdown(["None", "Google Drive", "Dropbox"], value="None", label="Cloud Provider")
                     destination = gr.Textbox(label="Cloud Destination Folder ID / Path",
@@ -2202,9 +2437,9 @@ def build_app(studio: Studio) -> Any:
                                 "Failed uploads retain the movie and checkpoint for retry.")
                 button = gr.Button("Start Autonomous Production", variant="primary")
                 attach = gr.Button("Attach / Resume Checkpoint")
-                gr.Markdown("Setup requires an API workflow and persistent storage. Cloud backup is optional. "
+                gr.Markdown("Missing workflows and public model weights are prepared automatically. Cloud backup is optional. "
                             "Three failed attempts skip a shot; a partial movie is clearly reported. "
-                            "Autoplay may require browser interaction. Preview and final video are silent.")
+                            "Autoplay with sound may require browser interaction. Source resolution limits recoverable detail.")
             with gr.Column(scale=3):
                 status = gr.Textbox(label="Production status", interactive=False)
                 video = gr.Video(label="Progressive movie preview", streaming=True, autoplay=True, interactive=False)
@@ -2218,7 +2453,7 @@ def build_app(studio: Studio) -> Any:
                             concurrency_limit=4)
         google_finish.click(finish_google, inputs=[owner, google_code], outputs=[google_code, google_status],
                             concurrency_limit=4)
-        button.click(start, [plot, image, minutes, provider, destination, secret, owner], outputs,
+        button.click(start, [plot, image, minutes, provider, destination, secret, owner, sound, cinematic], outputs,
                      concurrency_limit=1, concurrency_id="start_job", trigger_mode="once")
 
         def resume_monitor() -> Iterator[Any]:
@@ -2239,6 +2474,78 @@ def self_test() -> None:
     from unittest.mock import Mock, patch
 
     class Tests(unittest.TestCase):
+        def test_sound_plan_uses_scene_context_and_stable_seeds(self):
+            shot = {"shot_id": 2, "seed": 42, "visual_prompt": "Walking through rain beside a spaceship engine in the wind",
+                    "identity_tokens": "ocean fire"}
+            plan = audio_plan(shot)
+            self.assertEqual(plan, audio_plan(copy.deepcopy(shot)))
+            self.assertEqual(set(plan["cues"]), {"rain", "mechanical", "wind", "footsteps"})
+            self.assertGreater(len(sound_layers(plan)), len(plan["cues"]))
+            self.assertNotIn("water", plan["cues"])
+            self.assertNotEqual(plan["seed"], audio_plan({**shot, "shot_id": 3})["seed"])
+            self.assertEqual(audio_plan({"shot_id": 1, "visual_prompt": "A portrait indoors"})["cues"], ["room_tone"])
+
+        def test_new_movies_freeze_finishing_options_without_migrating_legacy(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                with patch(__name__ + ".workflow_config", return_value=({}, {})), \
+                     patch(__name__ + ".anchor_workflow_config", return_value=({}, {})), \
+                     patch.object(studio, "launch"):
+                    studio.start("A traveler", None, 1, "None", "", "", sound_design=False, cinematic=True)
+                profile = StateStore(Path(tmp)).data["media"]["postproduction"]
+                self.assertFalse(profile["audio"])
+                self.assertTrue(profile["cinematic"])
+                self.assertEqual(profile["crf"], 16)
+                legacy = {"width": 640, "height": 360, "fps": 24}
+                self.assertNotIn("curves", video_filters(legacy))
+                self.assertNotIn("noise=", video_filters(legacy))
+                finished = video_filters({**legacy, "postproduction": profile})
+                self.assertIn("crop=640:268", finished)
+                self.assertIn("curves=", finished)
+                self.assertIn("colorbalance=", finished)
+                self.assertIn("noise=", finished)
+
+        def test_sound_generation_has_a_validated_ambient_fallback(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                target = Path(tmp) / "sound.wav"
+                def fake_run(args, **kwargs):
+                    if "-filter_complex" in args:
+                        raise RuntimeError("cue filter failed")
+                    with wave.open(args[-1], "wb") as audio:
+                        audio.setnchannels(2)
+                        audio.setsampwidth(2)
+                        audio.setframerate(48000)
+                        audio.writeframes(b"\x00" * 960000)
+                    return ""
+                with patch(__name__ + ".run", side_effect=fake_run):
+                    plan = generate_sound({"shot_id": 1, "visual_prompt": "Rain"}, target,
+                                          postproduction_config(), lambda _: None)
+                validate_pcm(target)
+                self.assertEqual(plan["fallback"], "ambient_bed")
+
+        def test_finished_movie_requires_synchronized_aac_audio(self):
+            settings = {"width": 1920, "height": 1080, "fps": 24, "postproduction": postproduction_config()}
+            streams = [{"codec_type": "video", "codec_name": "h264", "width": 1920,
+                        "height": 804, "pix_fmt": "yuv420p", "duration": "10.0"},
+                       {"codec_type": "audio", "codec_name": "aac", "sample_rate": "48000",
+                        "channels": 2, "duration": "10.0", "start_time": "0.0"}]
+            for change in ("missing", "short", "late", "wrong_codec", "valid"):
+                sample = copy.deepcopy(streams)
+                if change == "missing":
+                    sample.pop()
+                elif change == "short":
+                    sample[1]["duration"] = "9.0"
+                elif change == "late":
+                    sample[1]["start_time"] = "0.5"
+                elif change == "wrong_codec":
+                    sample[1]["codec_name"] = "mp3"
+                with patch(__name__ + ".run", return_value=json.dumps({"streams": sample})):
+                    if change == "valid":
+                        validate_finished_media(Path("movie.mp4"), 10, settings)
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            validate_finished_media(Path("movie.mp4"), 10, settings)
+
         def test_public_media_does_not_expose_checkpoint_files(self):
             with tempfile.TemporaryDirectory() as tmp:
                 studio = Studio(Path(tmp), acquire_lock=False)
@@ -2943,13 +3250,88 @@ def self_test() -> None:
         raise SystemExit(1)
 
 
+def media_self_test() -> None:
+    """Real two-shot FFmpeg test: no ComfyUI, credentials, cloud or teardown.
+
+    Verifies effect syntax, audible PCM, AAC duration, progressive concatenation,
+    widescreen dimensions, preview audio, and recovery without a GPU re-render.
+    """
+    import array
+    import tempfile
+    for binary in ("ffmpeg", "ffprobe"):
+        if not shutil.which(binary):
+            raise RuntimeError(f"Media integration test needs {binary} on PATH")
+    LOG.setLevel(logging.INFO)
+    LOG.addHandler(logging.StreamHandler())
+    with tempfile.TemporaryDirectory(prefix="studio-media-test-") as temporary:
+        root = Path(temporary)
+        source = root / "source.mp4"
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+             "testsrc2=size=320x180:rate=24:duration=5", "-c:v", "libx264", "-threads", "2",
+             "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(source)])
+        studio = Studio(root, acquire_lock=False)
+        shots = structural_shots("Rain and wind around a humming spaceship engine.\nWalking beside a city river with a campfire.", 2)
+        for shot in shots:
+            raw = root / f"raw_{shot['shot_id']:04d}.mp4"
+            shutil.copyfile(source, raw)
+            shot.update(seed=1234, status="rendered", attempts=1, raw_sha256=digest(raw))
+        media = {"width": 640, "height": 360, "fps": 24, "postproduction": postproduction_config()}
+        studio.store.data = {"schema": 1, "job_id": "media-test", "folder": str(root),
+                             "shots": shots, "media": media, "master_shot_ids": []}
+        studio.store.save()
+        work: queue.Queue = queue.Queue()
+        for shot in shots:
+            work.put((shot, root / f"raw_{shot['shot_id']:04d}.mp4"))
+        work.put(None)
+        studio.consume(work)
+        if studio.assembly_error or any(s["status"] != "completed" for s in shots):
+            raise RuntimeError("Media integration failed: " + "\n".join(studio.lines))
+        metadata = validate_finished_media(root / "current_movie_stream.mp4", 10, media)
+        for shot in shots:
+            if shot["audio_plan"].get("fallback"):
+                raise RuntimeError("Layered audio unexpectedly used its fallback")
+            with wave.open(str(root / f"shot_{shot['shot_id']:04d}.wav"), "rb") as audio:
+                samples = array.array("h", audio.readframes(audio.getnframes()))
+                if sys.byteorder != "little":
+                    samples.byteswap()
+                peak = max(abs(value) for value in samples) / 32768
+                if not 0.001 < peak < 0.95:
+                    raise RuntimeError("Synthesized sound is silent or clipping")
+            preview_info = json.loads(run(["ffprobe", "-v", "error", "-show_streams", "-of", "json",
+                                          str(root / f"shot_{shot['shot_id']:04d}.ts")]))
+            if not any(s.get("codec_name") == "aac" for s in preview_info["streams"]):
+                raise RuntimeError("Streaming preview lost its soundtrack")
+        # Losing a PCM checkpoint should regenerate finishing from durable raw
+        # video, not rerender the shot or mix old and new processing profiles.
+        (root / "shot_0001.wav").unlink()
+        studio.recover_clips()
+        if shots[0]["status"] != "rendered" or shots[1]["status"] != "completed":
+            raise RuntimeError("Audio checkpoint recovery failed")
+        # Also exercise optional sound/grade toggles on real files.
+        for audio_enabled, grade_enabled in ((False, True), (True, False), (False, False)):
+            settings = {**media, "postproduction": postproduction_config(audio_enabled, grade_enabled)}
+            target = root / f"toggle_{int(audio_enabled)}_{int(grade_enabled)}.mp4"
+            normalize(source, target, settings, shots[0], studio.notice)
+            validate_finished_media(target, 5, settings)
+        hd = {**media, "width": 1920, "height": 1080}
+        normalize(source, root / "hd.mp4", hd, shots[0], studio.notice)
+        validate_finished_media(root / "hd.mp4", 5, hd)
+        video = next(s for s in metadata["streams"] if s["codec_type"] == "video")
+        print(f"Media integration PASSED: two shots, 10.0s, {video['width']}x{video['height']}, "
+              "H.264 + stereo AAC 48 kHz; 1920x804 export, layered sound, scope grade/grain, TS previews, toggles and recovery verified.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--media-self-test", action="store_true", help="Run real FFmpeg finishing tests without GPU/cloud/shutdown")
     parser.add_argument("--prepare", action="store_true", help="Prepare automatic workflows/models without rendering or shutdown")
     args = parser.parse_args()
     if args.self_test:
         self_test()
+        return
+    if args.media_self_test:
+        media_self_test()
         return
     root = Path(os.getenv("STUDIO_DIR", "/workspace")).resolve()
     root.mkdir(parents=True, exist_ok=True)
