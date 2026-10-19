@@ -1,0 +1,2090 @@
+{
+  "title": "The Last Light",
+  "duration_minutes": 30,
+  "genre": "atmospheric coastal science-fiction drama",
+  "plot": "01. The Empty Coast: Mara stands beneath a rusted canopy and studies an unlit coastal beacon She checks the brass compass hanging against her chest, then turns toward the tower She commits to crossing the harbor alone\n02. A Small Promise: Mara pauses beside a worn empty bench She rests one gloved hand on the bench, remembering someone through a quiet expression She leaves the bench and continues toward the seawall\n03. The Tide Mark: Mara watches the water touch a recent tide stain She compares the waterline to the lower stairway and chooses the upper route Her careful choice keeps her boots above the incoming surge\n04. Broken Arrival: Mara approaches a motionless boarding ramp She tests its handrail and recognizes that no ferry is coming She turns from the empty landing toward the inland maintenance road\n05. The Unlit Eye: Mara stops where the dormant lens housing becomes visible She shelters her compass from rain and searches the tower for an active maintenance lamp One small service lamp gives her a route inside\n06. Crossing the Threshold: Mara waits for a gust to pass before opening the heavy door She eases the door closed while rainwater drips from her unchanged coat The outside storm softens into an enclosed mechanical room tone\n07. The Sleeping Engine: Mara approaches the stationary machine and listens She follows an exposed copper conduit with her eyes rather than touching moving parts She notices a disconnected control lever beside the machine\n08. Stored Warmth: Mara holds her gloved palms near a warm pipe She notices that the building still contains a little usable heat Her expression shifts from discouragement to practical hope\n09. The First Attempt: Mara steadies herself beside the large manual lever She slowly moves the lever through one controlled arc The machine gives a weak vibration and falls silent again\n10. Listening Instead: Mara stops trying to force the lever She listens to an uneven low resonance and follows it toward a vibrating panel She understands that the failure is an obstruction rather than a lack of power\n11. A Path for Water: Mara studies a blocked drainage grate from dry footing She uses a broad fixed handle to open an existing side drain The water begins to recede along a coherent channel\n12. The Second Attempt: Mara returns to the lever after the drainage clears She moves the same control carefully and watches the flywheel from a safe distance The flywheel turns slowly and maintains a steady hum\n13. Light Without Reach: Mara looks upward through the central stairwell She begins climbing at a measured pace, one hand following the rail The service lights brighten but the main beacon remains dark\n14. The Weight of Height: Mara pauses beside the window, breathing steadily She steadies the compass against her chest while looking down at the harbor She chooses patience over rushing and resumes the ascent\n15. The Locked Circle: Mara reaches the large circular door and checks its mechanical handle She applies controlled pressure once, then releases it when the latch resists She notices that a nearby pressure indicator is still rising\n16. Waiting for Balance: Mara waits beside the closed door rather than forcing the mechanism She watches the physical gauge settle without any readable text or symbols The latch relaxes with a small mechanical movement\n17. The Lens Room: Mara enters slowly and studies reflections across the curved glass She circles the safe outer walkway without touching the lens A narrow strip of cloud light reveals salt residue on the protective housing\n18. What Was Left Behind: Mara notices an empty chair facing the sea She adjusts the chair to face the window and allows herself a quiet moment of grief She rises with the decision to finish the work rather than preserve the room as a shrine\n19. The Cloud Opens: Mara stands in a soft natural shaft of light beside the lens She notices a misaligned external shutter through its changing reflection The reflection gives her a precise mechanical problem to solve\n20. The Outer Walk: Mara steps onto the balcony and checks her footing She follows the railing toward a large shutter linkage, moving cautiously through gusts She reaches the linkage without letting go of the safe support\n21. Resistance: Mara braces her boots on the dry inner edge of the walkway She tests the broad shutter handle once and feels it stop against a fixed obstruction She releases the handle rather than forcing the metal to bend\n22. A Patient Repair: Mara studies a loose weather cover blocking the linkage She seats the hinged cover back into its intended mounting with one controlled movement The broad handle now has a clear unobstructed travel path\n23. The Opening: Mara moves the shutter handle slowly while keeping a stable stance The existing shutter opens along its fixed hinge and admits more light She watches the chamber interior brighten through the doorway\n24. An Incomplete Victory: Mara returns to the main control pedestal She enables the beacon with one deliberate physical control movement The lamp glows warmly but the beam remains stationary\n25. The Cost of Motion: Mara follows a steady hum to an idle rotation mechanism She notices that its clutch is disengaged while the generator continues to turn She recognizes that the mechanism needs a patient manual synchronization\n26. Matching the Rhythm: Mara waits beside the safe control handle and listens to the machine rhythm She times a slow control movement to the repeating vibration without reaching into the mechanism The drive begins to carry the platform at a stable gentle speed\n27. The First Sweep: Mara stays on the fixed outer walkway and watches the beam move The coherent light sweeps across mist while reflections move naturally over the glass A first clean sweep crosses the deserted harbor\n28. The Temptation to Leave: Mara begins descending toward the open route home She stops when the rotation hum becomes uneven behind her She turns back because a single successful sweep is not enough\n29. The Last Adjustment: Mara studies the clutch handle from the fixed safe walkway She makes one small controlled adjustment and waits through a full rotation The vibration settles into an even sustained rhythm\n30. The Full Horizon: Mara watches the beam complete a steady sweep through sea mist She follows its reflection across moving water while keeping the compass against her coat She sees that the harbor channel now has a dependable point of orientation\n31. A Distant Answer: Mara watches a small distant navigation light emerge through thinning fog She remains still while its position changes gradually along the marked channel Her expression softens because the restored beacon is already useful\n32. The Work of Staying: Mara opens the alcove window enough to admit the sea air She settles the chair near the doorway so she can hear the machine as well as the water The room becomes a place to inhabit rather than a place to mourn\n33. The Returning Color: Mara steps onto the protected balcony, her coat still visibly weathered She watches warm light return gradually to wet stone and copper The changing dawn keeps the same coherent palette and natural reflections\n34. No Monument: Mara makes one final visual check of the guarded mechanism She leaves the controls alone when the system is working correctly She accepts that care can mean allowing a balanced system to continue\n35. The Small Promise Kept: Mara stands at the doorway and touches the compass once without removing it She looks toward the harbor, then back to the lit tower with a calm deliberate breath Her obligation has become a freely chosen responsibility\n36. The Last Light Becomes the First: Mara takes a few measured steps along the safe stone path and stops facing the sea Hold a quiet final composition of one unchanged protagonist, moving water and a dependable sweep of light End on patient stillness, natural wind and surf, with no dialogue, titles, extra people or supernatural effects",
+  "characters": [
+    {
+      "id": "mara",
+      "name": "Mara Vale",
+      "appearance": "one adult woman in her late thirties, warm brown skin, a short straight black bob, brown eyes, a small healed scar through the left eyebrow; natural human anatomy and proportions",
+      "wardrobe": "one unchanged faded ochre waterproof coat over a charcoal turtleneck, dark trousers, practical black boots and dark gloves; the same brass compass on a short chest strap",
+      "psychology": "a patient maintenance engineer processing grief; observant and compassionate, she moves from duty through frustration to a freely chosen commitment to care",
+      "mass_kg": 68,
+      "position_m": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "id": "compass",
+      "name": "Mara's brass compass",
+      "appearance": "one palm-sized oval brass compass with a dark face, a short dark chest strap and a single shallow diagonal scratch; no readable lettering",
+      "mass_kg": 0.32,
+      "attached_to": "mara",
+      "attachment_offset_m": [
+        0.12,
+        1.15,
+        0.05
+      ]
+    }
+  ],
+  "storyboard": [
+    {
+      "scene_id": "scene_01",
+      "title": "The Empty Coast",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a deserted harbor before dawn, fine rain and distant surf. Mara stands beneath a rusted canopy and studies an unlit coastal beacon.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a deserted harbor before dawn, fine rain and distant surf, Mara stands beneath a rusted canopy and studies an unlit coastal beacon. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a deserted harbor before dawn, fine rain and distant surf; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a deserted harbor before dawn, fine rain and distant surf.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She checks the brass compass hanging against her chest, then turns toward the tower. Setting: a deserted harbor before dawn, fine rain and distant surf.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She checks the brass compass hanging against her chest, then turns toward the tower.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a deserted harbor before dawn, fine rain and distant surf; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She checks the brass compass hanging against her chest, then turns toward the tower.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She commits to crossing the harbor alone. Setting: a deserted harbor before dawn, fine rain and distant surf.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She commits to crossing the harbor alone. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_02",
+      "title": "A Small Promise",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a rain-dark harbor walkway with warm maintenance lamps. Mara pauses beside a worn empty bench.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a rain-dark harbor walkway with warm maintenance lamps, Mara pauses beside a worn empty bench. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a rain-dark harbor walkway with warm maintenance lamps; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a rain-dark harbor walkway with warm maintenance lamps.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She rests one gloved hand on the bench, remembering someone through a quiet expression. Setting: a rain-dark harbor walkway with warm maintenance lamps.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She rests one gloved hand on the bench, remembering someone through a quiet expression.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a rain-dark harbor walkway with warm maintenance lamps; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She rests one gloved hand on the bench, remembering someone through a quiet expression.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She leaves the bench and continues toward the seawall. Setting: a rain-dark harbor walkway with warm maintenance lamps.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She leaves the bench and continues toward the seawall. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_03",
+      "title": "The Tide Mark",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a narrow seawall above moving gray water. Mara watches the water touch a recent tide stain.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a narrow seawall above moving gray water, Mara watches the water touch a recent tide stain. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a narrow seawall above moving gray water; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a narrow seawall above moving gray water.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She compares the waterline to the lower stairway and chooses the upper route. Setting: a narrow seawall above moving gray water.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She compares the waterline to the lower stairway and chooses the upper route.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a narrow seawall above moving gray water; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She compares the waterline to the lower stairway and chooses the upper route.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: Her careful choice keeps her boots above the incoming surge. Setting: a narrow seawall above moving gray water.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: Her careful choice keeps her boots above the incoming surge. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_04",
+      "title": "Broken Arrival",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a deserted ferry landing under a flickering shelter. Mara approaches a motionless boarding ramp.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a deserted ferry landing under a flickering shelter, Mara approaches a motionless boarding ramp. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a deserted ferry landing under a flickering shelter; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a deserted ferry landing under a flickering shelter.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She tests its handrail and recognizes that no ferry is coming. Setting: a deserted ferry landing under a flickering shelter.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She tests its handrail and recognizes that no ferry is coming.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a deserted ferry landing under a flickering shelter; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She tests its handrail and recognizes that no ferry is coming.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She turns from the empty landing toward the inland maintenance road. Setting: a deserted ferry landing under a flickering shelter.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She turns from the empty landing toward the inland maintenance road. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_05",
+      "title": "The Unlit Eye",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the lighthouse exterior seen through drifting sea mist. Mara stops where the dormant lens housing becomes visible.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the lighthouse exterior seen through drifting sea mist, Mara stops where the dormant lens housing becomes visible. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the lighthouse exterior seen through drifting sea mist; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the lighthouse exterior seen through drifting sea mist.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She shelters her compass from rain and searches the tower for an active maintenance lamp. Setting: the lighthouse exterior seen through drifting sea mist.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She shelters her compass from rain and searches the tower for an active maintenance lamp.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the lighthouse exterior seen through drifting sea mist; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She shelters her compass from rain and searches the tower for an active maintenance lamp.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: One small service lamp gives her a route inside. Setting: the lighthouse exterior seen through drifting sea mist.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: One small service lamp gives her a route inside. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_06",
+      "title": "Crossing the Threshold",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the lighthouse service entrance and a shallow stone vestibule. Mara waits for a gust to pass before opening the heavy door.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the lighthouse service entrance and a shallow stone vestibule, Mara waits for a gust to pass before opening the heavy door. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the lighthouse service entrance and a shallow stone vestibule; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the lighthouse service entrance and a shallow stone vestibule.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She eases the door closed while rainwater drips from her unchanged coat. Setting: the lighthouse service entrance and a shallow stone vestibule.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She eases the door closed while rainwater drips from her unchanged coat.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the lighthouse service entrance and a shallow stone vestibule; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She eases the door closed while rainwater drips from her unchanged coat.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The outside storm softens into an enclosed mechanical room tone. Setting: the lighthouse service entrance and a shallow stone vestibule.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The outside storm softens into an enclosed mechanical room tone. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_07",
+      "title": "The Sleeping Engine",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a dim generator room with a silent flywheel. Mara approaches the stationary machine and listens.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a dim generator room with a silent flywheel, Mara approaches the stationary machine and listens. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a dim generator room with a silent flywheel; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a dim generator room with a silent flywheel.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She follows an exposed copper conduit with her eyes rather than touching moving parts. Setting: a dim generator room with a silent flywheel.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She follows an exposed copper conduit with her eyes rather than touching moving parts.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a dim generator room with a silent flywheel; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She follows an exposed copper conduit with her eyes rather than touching moving parts.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She notices a disconnected control lever beside the machine. Setting: a dim generator room with a silent flywheel.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She notices a disconnected control lever beside the machine. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_08",
+      "title": "Stored Warmth",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a small maintenance alcove with amber residual heat. Mara holds her gloved palms near a warm pipe.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a small maintenance alcove with amber residual heat, Mara holds her gloved palms near a warm pipe. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a small maintenance alcove with amber residual heat; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a small maintenance alcove with amber residual heat.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She notices that the building still contains a little usable heat. Setting: a small maintenance alcove with amber residual heat.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She notices that the building still contains a little usable heat.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a small maintenance alcove with amber residual heat; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She notices that the building still contains a little usable heat.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: Her expression shifts from discouragement to practical hope. Setting: a small maintenance alcove with amber residual heat.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: Her expression shifts from discouragement to practical hope. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_09",
+      "title": "The First Attempt",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the generator control station under a steady warm work lamp. Mara steadies herself beside the large manual lever.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the generator control station under a steady warm work lamp, Mara steadies herself beside the large manual lever. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the generator control station under a steady warm work lamp; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the generator control station under a steady warm work lamp.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She slowly moves the lever through one controlled arc. Setting: the generator control station under a steady warm work lamp.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She slowly moves the lever through one controlled arc.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the generator control station under a steady warm work lamp; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She slowly moves the lever through one controlled arc.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The machine gives a weak vibration and falls silent again. Setting: the generator control station under a steady warm work lamp.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The machine gives a weak vibration and falls silent again. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_10",
+      "title": "Listening Instead",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the same generator room with rain audible through a high vent. Mara stops trying to force the lever.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the same generator room with rain audible through a high vent, Mara stops trying to force the lever. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the same generator room with rain audible through a high vent; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the same generator room with rain audible through a high vent.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She listens to an uneven low resonance and follows it toward a vibrating panel. Setting: the same generator room with rain audible through a high vent.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She listens to an uneven low resonance and follows it toward a vibrating panel.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the same generator room with rain audible through a high vent; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She listens to an uneven low resonance and follows it toward a vibrating panel.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She understands that the failure is an obstruction rather than a lack of power. Setting: the same generator room with rain audible through a high vent.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She understands that the failure is an obstruction rather than a lack of power. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_11",
+      "title": "A Path for Water",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a low service corridor with shallow flowing water. Mara studies a blocked drainage grate from dry footing.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a low service corridor with shallow flowing water, Mara studies a blocked drainage grate from dry footing. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a low service corridor with shallow flowing water; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a low service corridor with shallow flowing water.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She uses a broad fixed handle to open an existing side drain. Setting: a low service corridor with shallow flowing water.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She uses a broad fixed handle to open an existing side drain.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a low service corridor with shallow flowing water; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She uses a broad fixed handle to open an existing side drain.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The water begins to recede along a coherent channel. Setting: a low service corridor with shallow flowing water.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The water begins to recede along a coherent channel. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_12",
+      "title": "The Second Attempt",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the generator room with the same motivated amber key light. Mara returns to the lever after the drainage clears.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the generator room with the same motivated amber key light, Mara returns to the lever after the drainage clears. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the generator room with the same motivated amber key light; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the generator room with the same motivated amber key light.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She moves the same control carefully and watches the flywheel from a safe distance. Setting: the generator room with the same motivated amber key light.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She moves the same control carefully and watches the flywheel from a safe distance.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the generator room with the same motivated amber key light; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She moves the same control carefully and watches the flywheel from a safe distance.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The flywheel turns slowly and maintains a steady hum. Setting: the generator room with the same motivated amber key light.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The flywheel turns slowly and maintains a steady hum. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_13",
+      "title": "Light Without Reach",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a spiral stair landing illuminated by newly restored service lights. Mara looks upward through the central stairwell.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a spiral stair landing illuminated by newly restored service lights, Mara looks upward through the central stairwell. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a spiral stair landing illuminated by newly restored service lights; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a spiral stair landing illuminated by newly restored service lights.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She begins climbing at a measured pace, one hand following the rail. Setting: a spiral stair landing illuminated by newly restored service lights.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She begins climbing at a measured pace, one hand following the rail.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a spiral stair landing illuminated by newly restored service lights; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She begins climbing at a measured pace, one hand following the rail.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The service lights brighten but the main beacon remains dark. Setting: a spiral stair landing illuminated by newly restored service lights.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The service lights brighten but the main beacon remains dark. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_14",
+      "title": "The Weight of Height",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a sheltered window midway up the lighthouse stair. Mara pauses beside the window, breathing steadily.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a sheltered window midway up the lighthouse stair, Mara pauses beside the window, breathing steadily. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a sheltered window midway up the lighthouse stair; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a sheltered window midway up the lighthouse stair.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She steadies the compass against her chest while looking down at the harbor. Setting: a sheltered window midway up the lighthouse stair.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She steadies the compass against her chest while looking down at the harbor.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a sheltered window midway up the lighthouse stair; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She steadies the compass against her chest while looking down at the harbor.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She chooses patience over rushing and resumes the ascent. Setting: a sheltered window midway up the lighthouse stair.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She chooses patience over rushing and resumes the ascent. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_15",
+      "title": "The Locked Circle",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the sealed door to the lens chamber. Mara reaches the large circular door and checks its mechanical handle.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the sealed door to the lens chamber, Mara reaches the large circular door and checks its mechanical handle. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the sealed door to the lens chamber; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the sealed door to the lens chamber.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She applies controlled pressure once, then releases it when the latch resists. Setting: the sealed door to the lens chamber.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She applies controlled pressure once, then releases it when the latch resists.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the sealed door to the lens chamber; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She applies controlled pressure once, then releases it when the latch resists.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She notices that a nearby pressure indicator is still rising. Setting: the sealed door to the lens chamber.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She notices that a nearby pressure indicator is still rising. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_16",
+      "title": "Waiting for Balance",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a quiet upper landing with a dull copper pressure pipe. Mara waits beside the closed door rather than forcing the mechanism.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a quiet upper landing with a dull copper pressure pipe, Mara waits beside the closed door rather than forcing the mechanism. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a quiet upper landing with a dull copper pressure pipe; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a quiet upper landing with a dull copper pressure pipe.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She watches the physical gauge settle without any readable text or symbols. Setting: a quiet upper landing with a dull copper pressure pipe.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She watches the physical gauge settle without any readable text or symbols.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a quiet upper landing with a dull copper pressure pipe; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She watches the physical gauge settle without any readable text or symbols.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The latch relaxes with a small mechanical movement. Setting: a quiet upper landing with a dull copper pressure pipe.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The latch relaxes with a small mechanical movement. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_17",
+      "title": "The Lens Room",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a broad circular chamber holding a large dormant lighthouse lens. Mara enters slowly and studies reflections across the curved glass.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a broad circular chamber holding a large dormant lighthouse lens, Mara enters slowly and studies reflections across the curved glass. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a broad circular chamber holding a large dormant lighthouse lens; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a broad circular chamber holding a large dormant lighthouse lens.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She circles the safe outer walkway without touching the lens. Setting: a broad circular chamber holding a large dormant lighthouse lens.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She circles the safe outer walkway without touching the lens.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a broad circular chamber holding a large dormant lighthouse lens; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She circles the safe outer walkway without touching the lens.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: A narrow strip of cloud light reveals salt residue on the protective housing. Setting: a broad circular chamber holding a large dormant lighthouse lens.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: A narrow strip of cloud light reveals salt residue on the protective housing. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_18",
+      "title": "What Was Left Behind",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a sparse keeper alcove adjoining the lens chamber. Mara notices an empty chair facing the sea.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a sparse keeper alcove adjoining the lens chamber, Mara notices an empty chair facing the sea. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a sparse keeper alcove adjoining the lens chamber; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a sparse keeper alcove adjoining the lens chamber.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She adjusts the chair to face the window and allows herself a quiet moment of grief. Setting: a sparse keeper alcove adjoining the lens chamber.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She adjusts the chair to face the window and allows herself a quiet moment of grief.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a sparse keeper alcove adjoining the lens chamber; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She adjusts the chair to face the window and allows herself a quiet moment of grief.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She rises with the decision to finish the work rather than preserve the room as a shrine. Setting: a sparse keeper alcove adjoining the lens chamber.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She rises with the decision to finish the work rather than preserve the room as a shrine. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_19",
+      "title": "The Cloud Opens",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the lens chamber as storm cloud briefly thins. Mara stands in a soft natural shaft of light beside the lens.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the lens chamber as storm cloud briefly thins, Mara stands in a soft natural shaft of light beside the lens. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the lens chamber as storm cloud briefly thins; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the lens chamber as storm cloud briefly thins.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She notices a misaligned external shutter through its changing reflection. Setting: the lens chamber as storm cloud briefly thins.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She notices a misaligned external shutter through its changing reflection.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the lens chamber as storm cloud briefly thins; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She notices a misaligned external shutter through its changing reflection.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The reflection gives her a precise mechanical problem to solve. Setting: the lens chamber as storm cloud briefly thins.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The reflection gives her a precise mechanical problem to solve. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_20",
+      "title": "The Outer Walk",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish a sheltered exterior balcony with sea spray below the railing. Mara steps onto the balcony and checks her footing.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In a sheltered exterior balcony with sea spray below the railing, Mara steps onto the balcony and checks her footing. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in a sheltered exterior balcony with sea spray below the railing; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in a sheltered exterior balcony with sea spray below the railing.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She follows the railing toward a large shutter linkage, moving cautiously through gusts. Setting: a sheltered exterior balcony with sea spray below the railing.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She follows the railing toward a large shutter linkage, moving cautiously through gusts.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in a sheltered exterior balcony with sea spray below the railing; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She follows the railing toward a large shutter linkage, moving cautiously through gusts.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She reaches the linkage without letting go of the safe support. Setting: a sheltered exterior balcony with sea spray below the railing.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She reaches the linkage without letting go of the safe support. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_21",
+      "title": "Resistance",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the balcony shutter linkage beneath wet copper housings. Mara braces her boots on the dry inner edge of the walkway.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the balcony shutter linkage beneath wet copper housings, Mara braces her boots on the dry inner edge of the walkway. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the balcony shutter linkage beneath wet copper housings; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the balcony shutter linkage beneath wet copper housings.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She tests the broad shutter handle once and feels it stop against a fixed obstruction. Setting: the balcony shutter linkage beneath wet copper housings.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She tests the broad shutter handle once and feels it stop against a fixed obstruction.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the balcony shutter linkage beneath wet copper housings; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She tests the broad shutter handle once and feels it stop against a fixed obstruction.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She releases the handle rather than forcing the metal to bend. Setting: the balcony shutter linkage beneath wet copper housings.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She releases the handle rather than forcing the metal to bend. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_22",
+      "title": "A Patient Repair",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the protected side of the same shutter housing. Mara studies a loose weather cover blocking the linkage.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the protected side of the same shutter housing, Mara studies a loose weather cover blocking the linkage. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the protected side of the same shutter housing; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the protected side of the same shutter housing.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She seats the hinged cover back into its intended mounting with one controlled movement. Setting: the protected side of the same shutter housing.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She seats the hinged cover back into its intended mounting with one controlled movement.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the protected side of the same shutter housing; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She seats the hinged cover back into its intended mounting with one controlled movement.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The broad handle now has a clear unobstructed travel path. Setting: the protected side of the same shutter housing.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The broad handle now has a clear unobstructed travel path. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_23",
+      "title": "The Opening",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the balcony with a narrow break in the cloud over the sea. Mara moves the shutter handle slowly while keeping a stable stance.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the balcony with a narrow break in the cloud over the sea, Mara moves the shutter handle slowly while keeping a stable stance. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the balcony with a narrow break in the cloud over the sea; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the balcony with a narrow break in the cloud over the sea.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: The existing shutter opens along its fixed hinge and admits more light. Setting: the balcony with a narrow break in the cloud over the sea.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: The existing shutter opens along its fixed hinge and admits more light.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the balcony with a narrow break in the cloud over the sea; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: The existing shutter opens along its fixed hinge and admits more light.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She watches the chamber interior brighten through the doorway. Setting: the balcony with a narrow break in the cloud over the sea.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She watches the chamber interior brighten through the doorway. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_24",
+      "title": "An Incomplete Victory",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the lens chamber with steady generator power and an open shutter. Mara returns to the main control pedestal.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the lens chamber with steady generator power and an open shutter, Mara returns to the main control pedestal. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the lens chamber with steady generator power and an open shutter; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the lens chamber with steady generator power and an open shutter.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She enables the beacon with one deliberate physical control movement. Setting: the lens chamber with steady generator power and an open shutter.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She enables the beacon with one deliberate physical control movement.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the lens chamber with steady generator power and an open shutter; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She enables the beacon with one deliberate physical control movement.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The lamp glows warmly but the beam remains stationary. Setting: the lens chamber with steady generator power and an open shutter.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The lamp glows warmly but the beam remains stationary. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_25",
+      "title": "The Cost of Motion",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the upper drive room beneath the lens platform. Mara follows a steady hum to an idle rotation mechanism.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the upper drive room beneath the lens platform, Mara follows a steady hum to an idle rotation mechanism. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the upper drive room beneath the lens platform; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the upper drive room beneath the lens platform.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She notices that its clutch is disengaged while the generator continues to turn. Setting: the upper drive room beneath the lens platform.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She notices that its clutch is disengaged while the generator continues to turn.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the upper drive room beneath the lens platform; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She notices that its clutch is disengaged while the generator continues to turn.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She recognizes that the mechanism needs a patient manual synchronization. Setting: the upper drive room beneath the lens platform.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She recognizes that the mechanism needs a patient manual synchronization. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_26",
+      "title": "Matching the Rhythm",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the guarded clutch station with moving parts kept behind barriers. Mara waits beside the safe control handle and listens to the machine rhythm.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the guarded clutch station with moving parts kept behind barriers, Mara waits beside the safe control handle and listens to the machine rhythm. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the guarded clutch station with moving parts kept behind barriers; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the guarded clutch station with moving parts kept behind barriers.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She times a slow control movement to the repeating vibration without reaching into the mechanism. Setting: the guarded clutch station with moving parts kept behind barriers.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She times a slow control movement to the repeating vibration without reaching into the mechanism.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the guarded clutch station with moving parts kept behind barriers; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She times a slow control movement to the repeating vibration without reaching into the mechanism.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The drive begins to carry the platform at a stable gentle speed. Setting: the guarded clutch station with moving parts kept behind barriers.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The drive begins to carry the platform at a stable gentle speed. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_27",
+      "title": "The First Sweep",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the lens chamber as the platform begins rotating. Mara stays on the fixed outer walkway and watches the beam move.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the lens chamber as the platform begins rotating, Mara stays on the fixed outer walkway and watches the beam move. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the lens chamber as the platform begins rotating; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the lens chamber as the platform begins rotating.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: The coherent light sweeps across mist while reflections move naturally over the glass. Setting: the lens chamber as the platform begins rotating.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: The coherent light sweeps across mist while reflections move naturally over the glass.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the lens chamber as the platform begins rotating; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: The coherent light sweeps across mist while reflections move naturally over the glass.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: A first clean sweep crosses the deserted harbor. Setting: the lens chamber as the platform begins rotating.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: A first clean sweep crosses the deserted harbor. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_28",
+      "title": "The Temptation to Leave",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the upper stair landing looking down toward the service exit. Mara begins descending toward the open route home.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the upper stair landing looking down toward the service exit, Mara begins descending toward the open route home. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the upper stair landing looking down toward the service exit; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the upper stair landing looking down toward the service exit.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She stops when the rotation hum becomes uneven behind her. Setting: the upper stair landing looking down toward the service exit.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She stops when the rotation hum becomes uneven behind her.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the upper stair landing looking down toward the service exit; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She stops when the rotation hum becomes uneven behind her.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She turns back because a single successful sweep is not enough. Setting: the upper stair landing looking down toward the service exit.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She turns back because a single successful sweep is not enough. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_29",
+      "title": "The Last Adjustment",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the guarded drive station with a slightly uneven mechanical hum. Mara studies the clutch handle from the fixed safe walkway.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the guarded drive station with a slightly uneven mechanical hum, Mara studies the clutch handle from the fixed safe walkway. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the guarded drive station with a slightly uneven mechanical hum; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the guarded drive station with a slightly uneven mechanical hum.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She makes one small controlled adjustment and waits through a full rotation. Setting: the guarded drive station with a slightly uneven mechanical hum.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She makes one small controlled adjustment and waits through a full rotation.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the guarded drive station with a slightly uneven mechanical hum; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She makes one small controlled adjustment and waits through a full rotation.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The vibration settles into an even sustained rhythm. Setting: the guarded drive station with a slightly uneven mechanical hum.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The vibration settles into an even sustained rhythm. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_30",
+      "title": "The Full Horizon",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the exterior balcony after the worst rain has passed. Mara watches the beam complete a steady sweep through sea mist.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the exterior balcony after the worst rain has passed, Mara watches the beam complete a steady sweep through sea mist. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the exterior balcony after the worst rain has passed; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the exterior balcony after the worst rain has passed.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She follows its reflection across moving water while keeping the compass against her coat. Setting: the exterior balcony after the worst rain has passed.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She follows its reflection across moving water while keeping the compass against her coat.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the exterior balcony after the worst rain has passed; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She follows its reflection across moving water while keeping the compass against her coat.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She sees that the harbor channel now has a dependable point of orientation. Setting: the exterior balcony after the worst rain has passed.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She sees that the harbor channel now has a dependable point of orientation. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_31",
+      "title": "A Distant Answer",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the lighthouse window above a broad empty sea. Mara watches a small distant navigation light emerge through thinning fog.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the lighthouse window above a broad empty sea, Mara watches a small distant navigation light emerge through thinning fog. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the lighthouse window above a broad empty sea; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the lighthouse window above a broad empty sea.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She remains still while its position changes gradually along the marked channel. Setting: the lighthouse window above a broad empty sea.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She remains still while its position changes gradually along the marked channel.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the lighthouse window above a broad empty sea; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She remains still while its position changes gradually along the marked channel.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: Her expression softens because the restored beacon is already useful. Setting: the lighthouse window above a broad empty sea.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: Her expression softens because the restored beacon is already useful. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_32",
+      "title": "The Work of Staying",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the keeper alcove with the same empty chair and soft practical light. Mara opens the alcove window enough to admit the sea air.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the keeper alcove with the same empty chair and soft practical light, Mara opens the alcove window enough to admit the sea air. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the keeper alcove with the same empty chair and soft practical light; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the keeper alcove with the same empty chair and soft practical light.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She settles the chair near the doorway so she can hear the machine as well as the water. Setting: the keeper alcove with the same empty chair and soft practical light.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She settles the chair near the doorway so she can hear the machine as well as the water.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the keeper alcove with the same empty chair and soft practical light; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She settles the chair near the doorway so she can hear the machine as well as the water.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The room becomes a place to inhabit rather than a place to mourn. Setting: the keeper alcove with the same empty chair and soft practical light.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The room becomes a place to inhabit rather than a place to mourn. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_33",
+      "title": "The Returning Color",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the lighthouse exterior as gray dawn becomes pale gold. Mara steps onto the protected balcony, her coat still visibly weathered.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the lighthouse exterior as gray dawn becomes pale gold, Mara steps onto the protected balcony, her coat still visibly weathered. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the lighthouse exterior as gray dawn becomes pale gold; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the lighthouse exterior as gray dawn becomes pale gold.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She watches warm light return gradually to wet stone and copper. Setting: the lighthouse exterior as gray dawn becomes pale gold.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She watches warm light return gradually to wet stone and copper.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the lighthouse exterior as gray dawn becomes pale gold; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She watches warm light return gradually to wet stone and copper.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: The changing dawn keeps the same coherent palette and natural reflections. Setting: the lighthouse exterior as gray dawn becomes pale gold.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: The changing dawn keeps the same coherent palette and natural reflections. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_34",
+      "title": "No Monument",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the chamber walkway beside the steadily rotating lens. Mara makes one final visual check of the guarded mechanism.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the chamber walkway beside the steadily rotating lens, Mara makes one final visual check of the guarded mechanism. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the chamber walkway beside the steadily rotating lens; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the chamber walkway beside the steadily rotating lens.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She leaves the controls alone when the system is working correctly. Setting: the chamber walkway beside the steadily rotating lens.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She leaves the controls alone when the system is working correctly.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the chamber walkway beside the steadily rotating lens; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She leaves the controls alone when the system is working correctly.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: She accepts that care can mean allowing a balanced system to continue. Setting: the chamber walkway beside the steadily rotating lens.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: She accepts that care can mean allowing a balanced system to continue. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_35",
+      "title": "The Small Promise Kept",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the sheltered lighthouse threshold facing the distant harbor bench. Mara stands at the doorway and touches the compass once without removing it.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the sheltered lighthouse threshold facing the distant harbor bench, Mara stands at the doorway and touches the compass once without removing it. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the sheltered lighthouse threshold facing the distant harbor bench; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the sheltered lighthouse threshold facing the distant harbor bench.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: She looks toward the harbor, then back to the lit tower with a calm deliberate breath. Setting: the sheltered lighthouse threshold facing the distant harbor bench.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: She looks toward the harbor, then back to the lit tower with a calm deliberate breath.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the sheltered lighthouse threshold facing the distant harbor bench; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: She looks toward the harbor, then back to the lit tower with a calm deliberate breath.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: Her obligation has become a freely chosen responsibility. Setting: the sheltered lighthouse threshold facing the distant harbor bench.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: Her obligation has become a freely chosen responsibility. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    },
+    {
+      "scene_id": "scene_36",
+      "title": "The Last Light Becomes the First",
+      "lighting_cue": "motivated coastal dawn light and warm practical lamps; consistent key direction and exposure within this scene",
+      "shots": [
+        {
+          "visual_prompt": "Establish the coastal headland in clear early morning with a distant stable beacon sweep. Mara takes a few measured steps along the safe stone path and stops facing the sea.",
+          "camera_movement": "slow establishing dolly",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "In the coastal headland in clear early morning with a distant stable beacon sweep, Mara takes a few measured steps along the safe stone path and stops facing the sea. Keep one clearly visible Mara and coherent geography.",
+          "camera_movement": "steady wide composition",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Mara considers the situation in the coastal headland in clear early morning with a distant stable beacon sweep; convey attention through a small natural change of expression.",
+          "camera_movement": "restrained medium portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "The same brass compass remains attached against Mara's ochre coat; its case and strap retain their shape in the coastal headland in clear early morning with a distant stable beacon sweep.",
+          "camera_movement": "steady insert of the chest compass, no extreme hand close-up",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Begin the action slowly: Hold a quiet final composition of one unchanged protagonist, moving water and a dependable sweep of light. Setting: the coastal headland in clear early morning with a distant stable beacon sweep.",
+          "camera_movement": "slow lateral tracking",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Continue the same controlled action from a stable nearby angle: Hold a quiet final composition of one unchanged protagonist, moving water and a dependable sweep of light.",
+          "camera_movement": "steady medium reaction",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Show a physically coherent environmental detail in the coastal headland in clear early morning with a distant stable beacon sweep; water, wind and reflections respond naturally. Keep Mara in the established geography.",
+          "camera_movement": "gentle environmental cutaway",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Complete the action without a sudden time jump: Hold a quiet final composition of one unchanged protagonist, moving water and a dependable sweep of light.",
+          "camera_movement": "restrained medium action",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Let the consequence become visible: End on patient stillness, natural wind and surf, with no dialogue, titles, extra people or supernatural effects. Setting: the coastal headland in clear early morning with a distant stable beacon sweep.",
+          "camera_movement": "steady three-quarter portrait",
+          "duration_seconds": 5
+        },
+        {
+          "visual_prompt": "Hold the resolved composition: End on patient stillness, natural wind and surf, with no dialogue, titles, extra people or supernatural effects. Preserve Mara's face, hair, coat, compass and spatial orientation.",
+          "camera_movement": "slow widening held composition",
+          "duration_seconds": 5
+        }
+      ]
+    }
+  ],
+  "creative_constraints": "One visible protagonist throughout. No dialogue, narration, crowds, titles or readable lettering. Muted blue-gray coastal palette with restrained warm copper and ochre highlights. Natural weather, restrained camera movement, clear mechanical causality and patient performance. Sound is procedural ambient weather and machinery; do not imply generated speech or a composed score."
+}

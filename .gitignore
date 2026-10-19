@@ -13,4 +13,6 @@ __pycache__/
 /runs/
 /public_media/
 /setup/
+/production_queue.json
+/queue_guard/
 /ComfyUI/models/

@@ -62,6 +62,33 @@ Consistency stack (all settings are snapshotted in the movie checkpoint):
   For controlled motion-noise amplitude, motion_parameters entries accept
   {"node":"70","input":"noise_aug_strength","base":0.02,"jitter":0.005}.
   All undeclared scalar sampler/model settings remain fixed to the API template.
+New-job scene ledger:
+  Plain prose uses a local LLM story-bible extractor when LLM_MODEL is configured,
+  otherwise a conservative structural cast parser. Optional JSON input accepts
+  plot, characters, objects, creative_constraints and an exact storyboard.
+  Per-character appearance, wardrobe, narrative psychology, deterministic seed,
+  root state [x,y,z,vx,vy,vz,mass], and per-scene lighting are checkpointed.
+  Newtonian trajectories and energy residuals audit the AUTHORED plan only.
+  Object attachments are kinematic constraints, not solved joint dynamics.
+  Lighting uses a simple positive-semidefinite proxy, NOT global illumination.
+  No quantum solver, pixel entanglement, PINN training, or drift elimination is
+  claimed. A PNG is a reference image, not a latent tensor. SDR grading does not
+  recreate a camera's log response or photochemical film emulsion.
+  All cast anchors are generated/cached; independent image conditioning needs
+  consistency character_bindings=[{character_id,node,input}] in a custom graph.
+  require_multi_character_conditioning=true rejects missing cast loaders.
+  STUDIO_REQUIRE_NATIVE_LATENTS=1 rejects unsupported temporal conditioning.
+  Native continuity may specify tensor_contract={tensor_key:'latent_tensor',
+    shape:[1,48,1,44,80],dtype:'F16'} (EXAMPLE ONLY; use actual model dimensions).
+  Contracted safetensors windows are checked for shape, dtype, NaN/Inf, checksum,
+  and model/VAE configuration signature. They are passed unchanged to the next
+  same-scene boundary; no incompatible latent is fabricated from an MP4.
+Follow-up queue:
+  python app.py --enqueue next_movie_30min.json --minutes 30
+  Requests persist in production_queue.json. Successful jobs archive their own
+  final_movie.mp4 before handing off. GPU stop is deferred until the queue drains;
+  backup failures still block both handoff and shutdown. Queued jobs are text-only,
+  local-storage jobs with default sound/grading; no credentials enter the queue.
 Paths: STUDIO_DIR=/workspace COMFY_OUTPUT_DIR=/workspace/ComfyUI/output
 API: COMFY_URL=http://127.0.0.1:8188
 Local OpenAI-compatible LLM: LLM_URL=http://127.0.0.1:11434/v1
@@ -180,7 +207,286 @@ def shot_prompt(shot: dict[str, Any]) -> str:
             f"CAMERA: {shot['camera_movement']}. LIGHTING: {shot['lighting_cue']}.\n"
             f"LOCKED IDENTITY: {shot.get('identity_tokens', IDENTITY_ANCHOR)}.\n"
             f"LOCKED STYLE: {shot.get('style_tokens', STYLE_ANCHOR)}.\n"
-            f"LOCKED OBJECTS: {shot.get('object_tokens', OBJECT_ANCHOR)}.")
+            f"LOCKED OBJECTS: {shot.get('object_tokens', OBJECT_ANCHOR)}."
+            + ("\nPLANNED CONTINUITY (conditioning instructions, not measured video): "
+               + shot["world_state"]["conditioning"] if shot.get("world_state") else ""))
+
+
+def story_input(text: str) -> dict[str, Any]:
+    """Plain prose is supported; optional JSON supplies an explicit cast ledger."""
+    if text.lstrip().startswith("{"):
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            raise ValueError("Structured story input must be valid JSON") from None
+        if not isinstance(value, dict) or not isinstance(value.get("plot"), str) or not value["plot"].strip():
+            raise ValueError("Structured story input requires a nonempty plot string")
+        return value
+    return {"plot": text}
+
+
+def vector3(value: Any, limit: float = 1e6) -> list[float]:
+    if (not isinstance(value, list) or len(value) != 3
+            or any(type(v) not in {int, float} or not math.isfinite(v) or abs(v) > limit for v in value)):
+        raise ValueError("World vectors must contain three finite, bounded numbers")
+    return [float(v) for v in value]
+
+
+def build_story_bible(plot: str, seed: int, notice: Callable[[str], None]) -> dict[str, Any]:
+    """Semantic LLM extraction when configured; conservative structural fallback.
+
+    This is an authored scene ledger, not a learned physical world model. A
+    numerical v_c contains [position_m, velocity_m_s, mass_kg]; identity,
+    wardrobe and narrative psychology remain named, auditable attributes.
+    """
+    source = story_input(plot)
+    origin = "structured" if "characters" in source else "structural"
+    if "characters" not in source and os.getenv("LLM_MODEL"):
+        try:
+            import requests
+            response = requests.post(os.getenv("LLM_URL", "http://127.0.0.1:11434/v1").rstrip("/") + "/chat/completions",
+                timeout=(10, 180), json={"model": os.environ["LLM_MODEL"], "temperature": 0,
+                "messages": [{"role": "system", "content":
+                    'Extract a story bible as JSON {"characters":[{"id":"protagonist","name":"...",'
+                    '"appearance":"...","wardrobe":"...","psychology":"narrative goal and temperament"}],'
+                    '"objects":[{"id":"prop_1","name":"...","appearance":"...","mass_kg":1}]}. '
+                    "Put the protagonist first. At most 8 characters and 32 recurring objects. "
+                    "Use only details supported by the plot; mark unspecified details as unspecified. "
+                    "Do not invent diagnoses. No physics predictions or code."},
+                    {"role": "user", "content": source["plot"]}]})
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"].strip()
+            extracted = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", content))
+            if not isinstance(extracted, dict) or not isinstance(extracted.get("characters"), list) or not extracted["characters"]:
+                raise ValueError("Invalid extracted cast")
+            # Validate model output through the same strict ledger parser below.
+            source = {"plot": source["plot"], **{k: extracted[k] for k in ("characters", "objects") if k in extracted}}
+            origin = "local_llm"
+        except Exception:
+            notice("Story-bible LLM unavailable; using a conservative structural cast ledger.")
+    if not source.get("characters"):
+        names = re.findall(r"(?:named|called|character:|protagonist:)\s+([A-Z][a-zA-Z-]{1,40})", source["plot"])
+        for pair in re.findall(r"\b([A-Z][a-z]{1,30})\s+(?:and|meets|follows|helps|chases)\s+([A-Z][a-z]{1,30})\b", source["plot"]):
+            names.extend(pair)
+        names = list(dict.fromkeys(names)) or ["Primary protagonist"]
+        source["characters"] = [{"id": f"character_{i+1}", "name": name} for i, name in enumerate(names)]
+    def text(value: Any, default: str) -> str:
+        if value is None:
+            return default
+        if not isinstance(value, str) or not value.strip() or len(value) > 2000:
+            raise ValueError("Story attributes must be nonempty strings of at most 2000 characters")
+        return value.strip()
+    def entities(values: Any, limit: int, character: bool) -> list[dict[str, Any]]:
+        if not isinstance(values, list) or len(values) > limit:
+            raise ValueError(f"Story ledger supports at most {limit} entities in this category")
+        result = []
+        identifiers = set()
+        for index, item in enumerate(values):
+            if not isinstance(item, dict):
+                raise ValueError("Each story entity must be a JSON object")
+            entity_id = item.get("id", f"{'character' if character else 'object'}_{index+1}")
+            if not isinstance(entity_id, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,47}", entity_id) or entity_id in identifiers:
+                raise ValueError("Story entity IDs must be unique safe identifiers")
+            identifiers.add(entity_id)
+            if (not character and item.get("attached_to") is not None
+                    and (not isinstance(item["attached_to"], str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,47}", item["attached_to"]))):
+                raise ValueError("Object attachment must use a safe character identifier")
+            mass = item.get("mass_kg", 70 if character else 1)
+            if type(mass) not in {float, int} or not math.isfinite(mass) or not 0.001 <= mass <= 1e9:
+                raise ValueError("Entity mass must be finite and between 0.001 and 1e9 kg")
+            position = vector3(item.get("position_m", [index * 1.5, 0, 0 if character else 3]))
+            velocity = vector3(item.get("velocity_m_s", [0, 0, 0]), 1000)
+            if position[1] < 0:
+                raise ValueError("Entity starts below the authored ground plane")
+            result.append({"id": entity_id, "name": text(item.get("name"), entity_id),
+                "appearance": text(item.get("appearance"), "follow the plot and immutable master reference"),
+                "wardrobe": text(item.get("wardrobe"), "same clothing, silhouette, materials and accessories throughout") if character else None,
+                "psychology": text(item.get("psychology"), "narrative motivation unspecified; maintain coherent reactions") if character else None,
+                "mass_kg": float(mass), "mass_source": "authored" if "mass_kg" in item else "planning_assumption",
+                "position_m": position, "velocity_m_s": velocity,
+                "attached_to": item.get("attached_to") if not character else None,
+                "attachment_offset_m": vector3(item.get("attachment_offset_m", [0, 0.9, 0])) if not character else None,
+                "state_vector": position + velocity + [float(mass)],
+                "seed": int.from_bytes(hashlib.sha256(f"{seed}:{entity_id}".encode()).digest()[:8], "big") % (2**63)})
+        return result
+    try:
+        characters = entities(source["characters"], 8, True)
+        objects = entities(source.get("objects", []), 32, False)
+        if {c["id"] for c in characters}.intersection(o["id"] for o in objects):
+            raise ValueError("Character and object IDs must be globally unique")
+        if any(o.get("attached_to") is not None and o["attached_to"] not in {c["id"] for c in characters} for o in objects):
+            raise ValueError("Object attachment must name an existing character ID")
+    except ValueError:
+        if origin != "local_llm":
+            raise
+        notice("Story-bible LLM attributes failed validation; falling back to a primary character ledger.")
+        return build_story_bible(json.dumps({"plot": source["plot"], "characters": [{"id": "protagonist", "name": "Primary protagonist"}]}), seed, notice)
+    characters[0]["seed"] = seed
+    return {"version": 1, "origin": origin, "plot": source["plot"],
+            "creative_constraints": text(source.get("creative_constraints"), "coherent cinematic style matching the immutable master reference"), "characters": characters,
+            "objects": objects, "primary_character_id": characters[0]["id"],
+            "scope": "authored planning constraints; not measurements or guarantees about generated pixels"}
+
+
+def advance_body(position: list[float], velocity: list[float], mass: float, seconds: float,
+                 ballistic: bool = False) -> dict[str, Any]:
+    """Analytic Newtonian trajectory, with a perfectly inelastic ground contact.
+
+    H_classical=p^2/(2m)+m*g*y is an audit quantity. No Schrödinger solver,
+    quantum entanglement, PINN training, or diffusion-gradient guidance occurs.
+    """
+    position, velocity = vector3(position), vector3(velocity, 1000)
+    if not math.isfinite(seconds) or not 0 < seconds <= 5 or not math.isfinite(mass) or mass <= 0:
+        raise ValueError("Invalid trajectory duration or mass")
+    if position[1] < 0 or (not ballistic and abs(velocity[1]) > 1e-9):
+        raise ValueError("Invalid grounded trajectory")
+    g = 9.80665
+    acceleration = [0.0, -g if ballistic else 0.0, 0.0]
+    duration = seconds
+    contact = False
+    if ballistic:
+        impact = (velocity[1] + math.sqrt(velocity[1] ** 2 + 2 * g * position[1])) / g
+        if impact <= seconds:
+            duration, contact = max(0.0, impact), True
+    endpoint = [position[i] + velocity[i] * seconds for i in range(3)]
+    endpoint[1] = max(0.0, position[1] + velocity[1] * duration + acceleration[1] * duration**2 / 2)
+    final_velocity = [velocity[i] + acceleration[i] * duration for i in range(3)]
+    dissipated = mass * final_velocity[1] ** 2 / 2 if contact else 0.0
+    if contact:
+        endpoint[1] = 0.0
+        final_velocity[1] = 0.0
+    initial_energy = mass * sum(v*v for v in velocity) / 2 + mass * g * position[1]
+    final_energy = mass * sum(v*v for v in final_velocity) / 2 + mass * g * endpoint[1]
+    residual = final_energy + dissipated - initial_energy
+    if not math.isfinite(residual) or abs(residual) > max(1e-5, abs(initial_energy) * 1e-9):
+        raise ValueError("Planned trajectory failed its mechanical energy balance")
+    return {"position_m": endpoint, "velocity_m_s": final_velocity, "mass_kg": mass,
+            "state_vector": endpoint + final_velocity + [mass], "ground_contact": contact,
+            "dissipated_energy_j": dissipated, "mechanical_energy_j": final_energy,
+            "energy_residual_j": residual, "rest_energy_j": mass * 299792458**2}
+
+
+def bind_world_state(shots: list[dict[str, Any]], bible: dict[str, Any]) -> None:
+    """Freeze authored per-scene physics/lighting instructions before any POST."""
+    previous: dict[str, Any] | None = None
+    for shot in shots:
+        if shot.get("world_state"):
+            previous = shot
+            continue  # Never change a checkpointed prompt or simulated boundary.
+        same_scene = previous is not None and previous["scene_id"] == shot["scene_id"]
+        prior = previous["world_state"]["entities"] if same_scene else {}
+        scene_text = (shot["visual_prompt"] + " " + shot["lighting_cue"]).lower()
+        light = (copy.deepcopy(previous["world_state"]["lighting"]) if same_scene else
+                 {"temperature_k": 3200 if re.search(r"\b(night|candle|tungsten)\b", scene_text) else 5600,
+                  "key_direction_world": [-0.4, 0.8, 0.4472135955], "ambient": 0.2, "key_intensity": 0.8})
+        direction = light["key_direction_world"]
+        # Positive semidefinite lighting proxy, NOT simulated global illumination.
+        light["illumination_proxy"] = [[light["ambient"] * int(i == j) + light["key_intensity"] * direction[i] * direction[j]
+                                        for j in range(3)] for i in range(3)]
+        entities = {}
+        for entity in bible["characters"] + bible["objects"]:
+            start = prior.get(entity["id"], {}).get("end", entity)
+            position = start["position_m"][:]
+            velocity = start["velocity_m_s"][:]
+            # Prescribed root motion needs external forces: report the impulse
+            # rather than falsely asserting conservation for an accelerated actor.
+            command = None
+            mentioned = entity in bible["characters"] and (len(bible["characters"]) == 1 or entity["name"].lower() in scene_text)
+            if mentioned:
+                command = (0.0 if re.search(r"\b(stands|waits|stops|remains still)\b", scene_text) else
+                           4.5 if re.search(r"\b(run|runs|running)\b", scene_text) else
+                           1.3 if re.search(r"\b(walk|walks|walking|stroll|strolls|strolling)\b", scene_text) else None)
+            requested_velocity = velocity[:] if command is None else [command, velocity[1], velocity[2]]
+            ballistic = bool(re.search(r"\b(falling|freefall|free-fall)\b", scene_text)) and mentioned
+            if not ballistic:
+                requested_velocity[1] = 0.0
+            end = advance_body(position, requested_velocity, entity["mass_kg"], 5, ballistic)
+            impulse = [entity["mass_kg"] * (requested_velocity[i] - velocity[i]) for i in range(3)]
+            entities[entity["id"]] = {"start_position_m": position, "start_velocity_m_s": requested_velocity,
+                                      "authored_impulse_ns": impulse, "end": end}
+            if entity.get("attached_to"):
+                parent = entities[entity["attached_to"]]
+                offset = entity["attachment_offset_m"]
+                attached = entities[entity["id"]]
+                attached["start_position_m"] = [parent["start_position_m"][i] + offset[i] for i in range(3)]
+                attached["start_velocity_m_s"] = parent["start_velocity_m_s"][:]
+                attached["authored_impulse_ns"] = [entity["mass_kg"] * (attached["start_velocity_m_s"][i] - velocity[i]) for i in range(3)]
+                attached["end"]["position_m"] = [parent["end"]["position_m"][i] + offset[i] for i in range(3)]
+                attached["end"]["velocity_m_s"] = parent["end"]["velocity_m_s"][:]
+                attached["end"]["state_vector"] = attached["end"]["position_m"] + attached["end"]["velocity_m_s"] + [entity["mass_kg"]]
+                attached["end"]["mechanical_energy_j"] = entity["mass_kg"] * (
+                    sum(v*v for v in attached["end"]["velocity_m_s"]) / 2 + 9.80665 * attached["end"]["position_m"][1])
+                attached["end"]["energy_residual_j"] = None
+                attached["end"]["dissipated_energy_j"] = None
+                attached["attachment"] = {"parent": entity["attached_to"], "offset_m": offset,
+                                           "model": "kinematic constraint; joint forces and work not solved"}
+        identities = "; ".join(f"{c['id']} ({c['name']}): {c['appearance']}; wardrobe: {c['wardrobe']}; motivation: {c['psychology']}"
+                               for c in bible["characters"])
+        props = "; ".join(f"{o['id']}: {o['appearance']}, fixed mass {o['mass_kg']} kg" for o in bible["objects"])
+        motion = "; ".join(f"{name}: root position {item['start_position_m']} -> {item['end']['position_m']} m; "
+                           f"root velocity {item['start_velocity_m_s']} m/s" for name, item in entities.items())
+        shot["world_state"] = {"version": 1, "source": "authored_simulation_not_video_measurement",
+            "entities": entities, "lighting": light, "scene_boundary": not same_scene,
+            "conditioning": (f"CAST: {identities}. RECURRING OBJECTS: {props or 'preserve established props'}. "
+                f"PLANNED ROOT MOTION: {motion}. Gravity 9.80665 m/s^2; supported bodies stay on the ground, "
+                "objects keep shape and mass, no unexplained duplication; fluid motion remains coherent. "
+                f"World-space key direction {direction}, color temperature {light['temperature_k']} K; "
+                "keep shadow direction, reflections and exposure consistent within the scene. "
+                f"GLOBAL DIRECTION: {bible.get('creative_constraints', '')}")}
+        previous = shot
+
+
+def workflow_capabilities(config: dict[str, Any]) -> dict[str, Any]:
+    profile = config.get("consistency", {})
+    continuity = profile.get("continuity", {})
+    mode = continuity.get("mode", "off")
+    return {"identity_reference": True, "adapter_count": len(profile.get("adapters", [])),
+            "continuity": mode, "native_latent_contract": bool(continuity.get("tensor_contract")),
+            "multi_character_bindings": len(config.get("character_bindings", [])),
+            "physical_control": "textual planning only", "quantum_solver": False, "pinn": False,
+            "global_illumination_solver": False, "guaranteed_identity_or_physics": False,
+            "grading": "display-referred SDR; not camera-log reconstruction"}
+
+
+def inspect_terminal_latent(path: Path, contract: dict[str, Any]) -> dict[str, Any]:
+    """Validate a bounded safetensors terminal window without pickle or torch.
+
+    No tensor arithmetic or silent reshaping is performed. A final VAE latent is
+    not the sampler's final noise state; the exported graph must define which
+    representation its next-shot conditioning node actually consumes.
+    """
+    import array
+    shape = contract.get("shape")
+    dtype = contract.get("dtype")
+    if (not isinstance(shape, list) or len(shape) != 5 or shape[0] != 1
+            or any(type(n) is not int or n <= 0 for n in shape) or shape[2] > 8
+            or math.prod(shape) > 64 * 1024**2 or dtype not in {"F16", "BF16", "F32"}):
+        raise ValueError("Terminal latent contract needs bounded [1,C,T,H,W] shape (T<=8) and F16/BF16/F32 dtype")
+    key = contract.get("tensor_key", "latent_tensor")
+    if not isinstance(key, str) or not key or len(key) > 128:
+        raise ValueError("Invalid terminal latent tensor key")
+    with path.open("rb") as stream:
+        header_size = int.from_bytes(stream.read(8), "little")
+        if not 2 <= header_size <= 1024**2:
+            raise ValueError("Invalid safetensors header length")
+        header = json.loads(stream.read(header_size))
+        item = header.get(key, {})
+        offsets = item.get("data_offsets")
+        if (item.get("shape") != shape or item.get("dtype") != dtype or not isinstance(offsets, list)
+                or len(offsets) != 2 or any(type(v) is not int or v < 0 for v in offsets)):
+            raise ValueError("Exported terminal tensor does not match the configured shape/dtype")
+        length = math.prod(shape) * (4 if dtype == "F32" else 2)
+        if offsets[1] - offsets[0] != length or 8 + header_size + offsets[1] > path.stat().st_size:
+            raise ValueError("Terminal tensor offsets or byte count are invalid")
+        stream.seek(8 + header_size + offsets[0])
+        raw = stream.read(length)
+    values = array.array("I" if dtype == "F32" else "H", raw)
+    if sys.byteorder != "little":
+        values.byteswap()
+    exponent = {"F32": 0x7f800000, "F16": 0x7c00, "BF16": 0x7f80}[dtype]
+    if any(value & exponent == exponent for value in values):
+        raise ValueError("Terminal tensor contains NaN or infinity")
+    return {"shape": shape, "dtype": dtype, "tensor_key": key, "finite": True}
 
 
 def bind_shot_consistency(shots: list[dict[str, Any]], settings: dict[str, Any], master_seed: int) -> None:
@@ -458,7 +764,11 @@ def audio_plan(shot: dict[str, Any]) -> dict[str, Any]:
     cues = [name for name, pattern in vocabulary.items() if re.search(pattern, text)]
     seed = int.from_bytes(hashlib.sha256(
         f"{shot.get('seed', 0)}:{shot.get('shot_id', 0)}:sound-v1".encode()).digest()[:4], "big") % 2147483647
-    return {"version": 1, "mode": "procedural", "cues": cues or ["room_tone"], "seed": seed}
+    plan = {"version": 1, "mode": "procedural", "cues": cues or ["room_tone"], "seed": seed}
+    if shot.get("world_state"):
+        plan.update(version=2, pan=-0.65 if re.search(r"\b(?:from|on|to) (?:the )?left\b", text)
+                    else 0.65 if re.search(r"\b(?:from|on|to) (?:the )?right\b", text) else 0.0)
+    return plan
 
 
 def sound_layers(plan: dict[str, Any]) -> list[str]:
@@ -509,6 +819,9 @@ def generate_sound(shot: dict[str, Any], target: Path, settings: dict[str, Any],
     for index in range(len(sources)):
         # Modest asymmetric levels give the layers width without phase reversal.
         left, right = ((0.90, 1.0) if index % 2 else (1.0, 0.90))
+        if index and "pan" in plan:
+            angle = (plan["pan"] + 1) * math.pi / 4
+            left, right = math.cos(angle), math.sin(angle)  # Equal-power stereo pan.
         filters.append(f"[{index}:a]pan=stereo|c0={left}*c0|c1={right}*c0[layer{index}]")
         labels.append(f"[layer{index}]")
     filters.append("".join(labels) + f"amix=inputs={len(sources)}:duration=longest:normalize=0,"
@@ -655,6 +968,65 @@ class StateStore:
             return copy.deepcopy(self.data)
 
 
+class MovieQueue:
+    """Durable text-only follow-up queue; cloud credentials never enter this file."""
+    def __init__(self, root: Path):
+        self.root = root
+        self.path = root / "production_queue.json"
+
+    def transaction(self, operation: Callable[[list[dict[str, Any]]], Any]) -> Any:
+        for attempt in range(40):
+            try:
+                lock = WorkspaceLock(self.root / "queue_guard")
+                break
+            except RuntimeError:
+                if attempt == 39:
+                    raise
+                time.sleep(0.05)
+        try:
+            items = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else []
+            if not isinstance(items, list):
+                raise ValueError("Invalid production queue; retain the file for recovery")
+            result = operation(items)
+            atomic_json(self.path, items)
+            return result
+        finally:
+            lock.close()
+
+    def enqueue(self, plot: str, minutes: float = 30) -> dict[str, Any]:
+        if not isinstance(plot, str) or not plot.strip() or len(plot) > 250000 or not 5 / 60 <= minutes <= 60:
+            raise ValueError("Queued movie needs a plot and duration between five seconds and 60 minutes")
+        story_input(plot)
+        fingerprint = hashlib.sha256((plot + f"\n{minutes:.6f}").encode()).hexdigest()
+        def update(items: list[dict[str, Any]]) -> dict[str, Any]:
+            existing = next((item for item in items if item.get("fingerprint") == fingerprint
+                             and item.get("status") in {"pending", "starting", "running"}), None)
+            if existing:
+                return copy.deepcopy(existing)
+            item = {"id": uuid.uuid4().hex, "plot": plot, "minutes": minutes, "fingerprint": fingerprint,
+                    "status": "pending", "created_at": utc(), "provider": "None"}
+            items.append(item)
+            return copy.deepcopy(item)
+        return self.transaction(update)
+
+    def claim(self, completed_id: str | None = None) -> dict[str, Any] | None:
+        def update(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+            for item in items:
+                if completed_id and item["id"] == completed_id:
+                    item.update(status="completed", completed_at=utc())
+            item = next((item for item in items if item.get("status") in {"pending", "starting"}), None)
+            if item:
+                item.update(status="starting", claimed_at=utc())
+            return copy.deepcopy(item)
+        return self.transaction(update)
+
+    def started(self, request_id: str, job_id: str) -> None:
+        def update(items: list[dict[str, Any]]) -> None:
+            item = next(item for item in items if item["id"] == request_id)
+            item.update(status="running", job_id=job_id, started_at=utc())
+        self.transaction(update)
+
+
 def structural_shots(plot: str, count: int) -> list[dict[str, Any]]:
     """Deterministic fallback; handles explicit newline-separated storyboard beats."""
     beats = [line.strip() for line in plot.splitlines() if line.strip()] or [plot]
@@ -675,6 +1047,38 @@ def structural_shots(plot: str, count: int) -> list[dict[str, Any]]:
 
 
 def plan_shots(plot: str, count: int, notice: Callable[[str], None]) -> list[dict[str, Any]]:
+    source = story_input(plot)
+    if "storyboard" in source:
+        board = source["storyboard"]
+        if not isinstance(board, list) or not board or len(board) > 720:
+            raise ValueError("Structured storyboard must contain 1–720 scenes")
+        shots = []
+        seen = set()
+        for scene in board:
+            if not isinstance(scene, dict) or not isinstance(scene.get("shots"), list) or not scene["shots"]:
+                raise ValueError("Each storyboard scene needs a nonempty shots list")
+            scene_id = scene.get("scene_id")
+            if not isinstance(scene_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", scene_id) or scene_id in seen:
+                raise ValueError("Storyboard scene IDs must be unique safe identifiers")
+            seen.add(scene_id)
+            for item in scene["shots"]:
+                item = {"visual_prompt": item} if isinstance(item, str) else item
+                if not isinstance(item, dict):
+                    raise ValueError("Storyboard shots must be prompt strings or objects")
+                shot = {"shot_id": len(shots) + 1, "scene_id": scene_id,
+                    "visual_prompt": item.get("visual_prompt"),
+                    "camera_movement": item.get("camera_movement", "restrained cinematic camera movement"),
+                    "lighting_cue": item.get("lighting_cue", scene.get("lighting_cue", "consistent motivated lighting")),
+                    "duration_seconds": item.get("duration_seconds", 5)}
+                if (shot["duration_seconds"] != 5 or any(not isinstance(shot.get(k), str) or not shot[k].strip()
+                    or len(shot[k]) > 12000 for k in ("visual_prompt", "camera_movement", "lighting_cue"))):
+                    raise ValueError("Storyboard shots require finite five-second durations and nonempty bounded prompts")
+                shots.append(shot)
+        if len(shots) != count:
+            raise ValueError(f"Storyboard has {len(shots)} shots; selected duration requires {count} five-second shots")
+        notice(f"Using authored storyboard: {len(board)} scenes, {count} sequential shots.")
+        return shots
+    plot = source["plot"]
     model = os.getenv("LLM_MODEL")
     if not model:
         notice("Using deterministic structural storyboard planner.")
@@ -782,6 +1186,11 @@ class ComfyClient:
         graph[self.config["image_node"]]["inputs"][self.config["image_input"]] = reference
         for binding in self.config.get("image_bindings", []):
             graph[binding["node"]]["inputs"][binding["input"]] = reference
+        for binding in self.config.get("character_bindings", []):
+            filename = shot.get("character_references", {}).get(binding["character_id"])
+            if not filename:
+                raise ValueError("Missing checkpointed cast reference for a configured character loader")
+            graph[binding["node"]]["inputs"][binding["input"]] = filename
         if self.config["seed_node"]:
             graph[self.config["seed_node"]]["inputs"][self.config["seed_input"]] = shot["seed"]
         for binding in self.config.get("seed_bindings", []):
@@ -942,6 +1351,20 @@ def workflow_config(graph_override: dict[str, Any] | None = None,
     if not config["seed_node"] and not config["seed_bindings"]:
         raise ValueError("Video workflow must expose a literal seed/noise_seed, or configure COMFY_SEED_NODE / input")
     config["consistency"] = consistency_config(graph, config, profile)
+    config["model_signature"] = hashlib.sha256(json.dumps({node: item for node, item in graph.items()
+        if any(name in item.get("class_type", "").lower() for name in ("unetloader", "vaeloader", "checkpointloader", "loraloader"))},
+        sort_keys=True).encode()).hexdigest()
+    config["character_bindings"] = copy.deepcopy(config["consistency"].get("character_bindings", []))
+    if not isinstance(config["character_bindings"], list):
+        raise ValueError("character_bindings must be a list")
+    bound_loaders = {config["image_node"]} | {b["node"] for b in config["image_bindings"]}
+    for binding in config["character_bindings"]:
+        if (not isinstance(binding, dict) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,47}", str(binding.get("character_id", "")))
+                or binding.get("node") not in graph
+                or not isinstance(graph[binding["node"]].get("inputs", {}).get(binding.get("input")), str)
+                or binding["node"] in bound_loaders):
+            raise ValueError("Each character binding must map a distinct file loader and a safe character ID")
+        bound_loaders.add(binding["node"])
     for item in config["consistency"]["adapters"]:
         graph[item["node"]]["inputs"].update(copy.deepcopy(item.get("links", {})))
     continuity = config["consistency"]["continuity"]
@@ -965,6 +1388,9 @@ def workflow_config(graph_override: dict[str, Any] | None = None,
             raise ValueError("Map image filenames to file-loader string inputs, not adapter IMAGE sockets")
     if continuity["mode"] == "image" and continuity["loader_node"] not in reachable:
         raise ValueError("Continuity image loader must contribute to the saved video output")
+    for binding in config["character_bindings"]:
+        if binding["node"] not in reachable or binding["node"] == continuity.get("loader_node"):
+            raise ValueError("Character reference loader must reach the video output and be separate from the temporal loader")
     for adapter in config["consistency"]["adapters"]:
         if adapter["node"] not in reachable:
             raise ValueError("Configured identity adapter / stand-in node is disconnected from the video output")
@@ -1605,6 +2031,7 @@ class Studio:
         self.store = StateStore(self.root)
         self.guard = threading.Lock()
         self.thread: threading.Thread | None = None
+        self.handoff_thread: threading.Thread | None = None
         self.lines: deque[str] = deque(maxlen=300)
         self.live_lock = threading.Lock()
         self.streams: list[str] = []
@@ -1637,10 +2064,10 @@ class Studio:
         return target
 
     def running(self) -> bool:
-        return bool(self.thread and self.thread.is_alive())
+        return bool((self.thread and self.thread.is_alive()) or (self.handoff_thread and self.handoff_thread.is_alive()))
 
     def launch(self) -> None:
-        if self.running():
+        if self.running() and threading.current_thread() is not self.handoff_thread:
             raise RuntimeError("Studio is already running")
         self.thread = threading.Thread(target=self.pipeline, name="movie-coordinator", daemon=False)
         self.thread.start()
@@ -1649,18 +2076,53 @@ class Studio:
         if self.store.data and self.store.data.get("status") not in TERMINAL:
             self.notice("Interrupted checkpoint detected; automatically resuming.")
             self.launch()
+        elif not self.running() and MovieQueue(self.root).path.exists():
+            self.schedule_next_queued()
+
+    def schedule_next_queued(self) -> bool:
+        """Commit a handoff before withholding teardown; retry safely after crash."""
+        queue_store = MovieQueue(self.root)
+        if not queue_store.path.exists():
+            return False
+        request = queue_store.claim(self.store.data.get("queued_request_id"))
+        if not request:
+            return False
+        with self.store.lock:
+            if self.store.data:
+                self.store.data.update(status="partial" if self.store.data.get("partial") else "complete",
+                                       next_queued_request=request["id"])
+                self.store.save()
+        previous = self.thread
+        def handoff() -> None:
+            try:
+                if previous and previous is not threading.current_thread():
+                    previous.join()
+                self.start(request["plot"], None, request["minutes"], "None", "", "",
+                           queued_request_id=request["id"])
+                queue_store.started(request["id"], self.store.data["job_id"])
+            except Exception as exc:
+                self.notice(f"Queued movie handoff failed ({type(exc).__name__}); request retained for restart recovery. GPU stop withheld.")
+            finally:
+                if self.handoff_thread is threading.current_thread():
+                    self.handoff_thread = None
+        self.notice(f"Movie archived. Queued production {request['id']} will start next; GPU shutdown deferred.")
+        self.handoff_thread = threading.Thread(target=handoff, name="movie-handoff", daemon=False)
+        self.handoff_thread.start()
+        return True
 
     def start(self, plot: str, image: str | None, minutes: float, provider: str,
               destination: str, secret: str, shutdown: bool = True,
-              google_credentials: str = "", sound_design: bool = True, cinematic: bool = True) -> None:
+              google_credentials: str = "", sound_design: bool = True, cinematic: bool = True,
+              queued_request_id: str | None = None) -> None:
         with self.guard:
-            if self.running():
+            if self.running() and threading.current_thread() is not self.handoff_thread:
                 raise ValueError("A movie is already running; attach to the current job")
             if self.store.data and self.store.data.get("status") not in TERMINAL:
                 self.launch()
                 return
             if not plot.strip():
                 raise ValueError("Provide a movie plot")
+            story_input(plot)  # Validate structured input before creating a job.
             count = int(round(float(minutes) * 60 / 5))
             if not 1 <= count <= 720:
                 raise ValueError("Duration must be between five seconds and 60 minutes")
@@ -1724,6 +2186,8 @@ class Studio:
                 atomic_bytes(Path(self.store.data["folder"]) / "state.archive.json", self.store.path.read_bytes())
             self.store.data = {"schema": 1, "job_id": job_id, "folder": str(folder), "created_at": utc(),
                 "status": "setting_up" if setup_pending else "planning", "setup_pending": setup_pending,
+                "story_engine_version": 1,
+                "queued_request_id": queued_request_id,
                 "plot": plot, "shot_count": count, "shots": [],
                 "reference": str(reference) if reference else None, "anchor": anchor, "master_seed": master_seed,
                 "workflow": graph, "comfy": config, "media": {"width": width, "height": height, "fps": fps,
@@ -1740,7 +2204,7 @@ class Studio:
             shot.update(changes)
             self.store.save()
 
-    def ensure_master_anchor(self, client: ComfyClient) -> Path:
+    def ensure_master_anchor(self, client: ComfyClient, character: dict[str, Any] | None = None) -> Path:
         """Create once, checkpoint before shots, reuse the exact same pixels.
 
         A run-private image is authoritative. The required fixed input filename
@@ -1748,19 +2212,20 @@ class Studio:
         cached anchor, avoiding collisions with other users of ComfyUI.
         """
         state = self.store.data
-        if state.get("reference") and not state.get("anchor"):
+        if character is None and state.get("reference") and not state.get("anchor"):
             # Backward compatibility with pre-Auto-Character checkpoints.
             return Path(state["reference"])
-        anchor = state["anchor"]
+        anchor = character["anchor"] if character is not None else state["anchor"]
         if anchor["mode"] == "provided":
             reference = Path(anchor["image_path"])
             if not reference.is_file() or digest(reference) != anchor["image_sha256"]:
                 raise RuntimeError("Uploaded master reference is missing/corrupt; restore it before resuming")
             self.notice("Using uploaded character reference as the fixed master anchor.")
             return reference
-        cached = Path(state["folder"]) / "master_character.png"
+        basename = f"character_{character['id']}" if character is not None else "master_character"
+        cached = Path(state["folder"]) / (basename + ".png")
         input_dir = Path(state["comfy"].get("input_dir", str(Path(state["comfy"]["output_dir"]).parent / "input")))
-        alias = input_dir / "auto_master_character.png"
+        alias = input_dir / (f"auto_{basename}.png" if character is not None else "auto_master_character.png")
         expected_hash = anchor.get("image_sha256")
         if (expected_hash and (not cached.exists() or digest(cached) != expected_hash)
                 and alias.is_file() and digest(alias) == expected_hash):
@@ -1777,6 +2242,14 @@ class Studio:
                        "Choose and establish a coherent visual rendering style and palette for the entire movie. "
                        f"Movie plot: {state['plot']} First shot: {first['visual_prompt']}. "
                        f"Lighting style: {first['lighting_cue']}.")
+        identity = character or next(iter(state.get("story_bible", {}).get("characters", [])), None)
+        if identity:
+            description = (f"Create a single cinematic character reference for {identity['name']}. "
+                           f"Appearance: {identity['appearance']}. Wardrobe: {identity['wardrobe']}. "
+                           "One subject, clear unobstructed face, visible hairstyle, distinctive outfit, three-quarter portrait. "
+                           f"Narrative temperament: {identity['psychology']}. "
+                           f"Movie context: {state.get('story_bible', {}).get('plot', state['plot'])}. "
+                           f"Opening scene: {first['visual_prompt']}; lighting: {first['lighting_cue']}.")
         graph = copy.deepcopy(anchor["workflow"])
         config = anchor["config"]
         graph[config["prompt_node"]]["inputs"][config["prompt_input"]] = description
@@ -1790,7 +2263,8 @@ class Studio:
             if anchor.get("status") not in {"submitting", "submitted"}:
                 attempt = anchor.get("attempts", 0) + 1
                 anchor.update(attempts=attempt, status="submitting",
-                              marker=anchor.get("reconcile_marker") or f"{state['job_id']}:anchor:{attempt}",
+                              marker=anchor.get("reconcile_marker") or (f"{state['job_id']}:anchor:{character['id']}:{attempt}"
+                                  if character is not None else f"{state['job_id']}:anchor:{attempt}"),
                               prompt_id=anchor.get("retry_prompt_id"))
                 self.store.save()
             prompt_id = anchor.get("prompt_id")
@@ -1800,7 +2274,7 @@ class Studio:
                 anchor.update(prompt_id=prompt_id, status="submitted")
                 self.store.save()
                 source = client.wait(prompt_id, self.notice, output_node=config["output_node"], kind="image")
-                candidate = cached.with_name("master_character.candidate.png")
+                candidate = cached.with_name(basename + ".candidate.png")
                 save_anchor_png(source, candidate)
                 checksum = digest(candidate)
                 if expected_hash and checksum != expected_hash and any(s["status"] == "completed" for s in state["shots"]):
@@ -1810,7 +2284,8 @@ class Studio:
                 atomic_bytes(alias, cached.read_bytes())
                 anchor.update(status="ready", image_path=str(cached), image_sha256=checksum,
                               description=description, completed_at=utc())
-                state["reference"] = str(cached)
+                if character is None:
+                    state["reference"] = str(cached)
                 self.store.save()
                 self.notice(f"Auto-Character master saved: {alias}. All shots reuse this anchor and locked seed.")
                 return cached
@@ -1823,6 +2298,49 @@ class Studio:
                 if anchor["attempts"] < ATTEMPTS:
                     time.sleep(2 ** anchor["attempts"])
         raise RuntimeError("Master anchor generation exhausted three attempts; no movie shots were rendered")
+
+    def ensure_cast_references(self, client: ComfyClient, master: Path) -> dict[str, str]:
+        """Generate/cache every cast anchor; inject only supported loader sockets."""
+        state = self.store.data
+        bible = state.get("story_bible")
+        if not bible:
+            return {}
+        characters = bible["characters"]
+        primary = bible["primary_character_id"]
+        bindings = state["comfy"].get("character_bindings", [])
+        identifiers = {c["id"] for c in characters}
+        if any(binding["character_id"] not in identifiers for binding in bindings):
+            raise SetupError("Workflow character bindings reference an ID absent from the story bible")
+        bound = {b["character_id"] for b in bindings} | {primary}
+        missing = identifiers - bound
+        if missing and state["comfy"].get("consistency", {}).get("require_multi_character_conditioning"):
+            raise SetupError("Strict cast conditioning requires independent loaders for: " + ", ".join(sorted(missing)))
+        references = {}
+        for character in characters:
+            if character["id"] == primary:
+                character["anchor"] = copy.deepcopy(state["anchor"])
+                path = master
+            else:
+                if "anchor" not in character:
+                    template = state.get("auto_anchor_template", {})
+                    if not template:
+                        graph, config = anchor_workflow_config(state["workflow"])
+                        template = {"workflow": graph, "config": config}
+                    character["anchor"] = {"mode": "auto", "seed": character["seed"], "status": "pending",
+                        "attempts": 0, "workflow": copy.deepcopy(template["workflow"]), "config": copy.deepcopy(template["config"])}
+                    self.store.save()
+                path = self.ensure_master_anchor(client, character)
+            references[character["id"]] = retry(lambda path=path, cid=character["id"]:
+                client.upload(path, f"{state['job_id']}_cast_{cid}"), "Cast reference upload", self.notice)
+        if missing:
+            self.notice("Cast anchors generated, but this workflow has no independent image conditioning for "
+                        + ", ".join(sorted(missing)) + "; those characters currently receive text constraints only.")
+        with self.store.lock:
+            for shot in state["shots"]:
+                shot.setdefault("character_references", copy.deepcopy(references))
+            self.store.save()
+        atomic_json(Path(state["folder"]) / "story_bible.json", bible)
+        return references
 
     def render_shot(self, client: ComfyClient, shot: dict[str, Any], reference: str) -> Path | None:
         """Persist every attempt before submitting. Reuse IDs after network errors."""
@@ -1921,10 +2439,16 @@ class Studio:
             if len(paths) != 1:
                 raise ValueError("Native continuity exporter must report exactly one final-latent file")
             source = paths.pop()
+            if settings.get("tensor_contract"):
+                tensor_info = inspect_terminal_latent(source, settings["tensor_contract"])
+            else:
+                tensor_info = {"contract_validated": False}
             target = folder / f"tail_{shot['shot_id']:04d}{source.suffix}"
             atomic_bytes(target, source.read_bytes())
         self.checkpoint_shot(shot, tail_condition={"mode": mode, "path": str(target), "sha256": digest(target),
-                            "source_sha256": shot["raw_sha256"], "captured_at": utc()})
+                            "source_sha256": shot["raw_sha256"], "captured_at": utc(),
+                            "model_signature": self.store.data["comfy"].get("model_signature"),
+                            "tensor_info": tensor_info if mode == "latent" else None})
 
     def prepare_continuity(self, client: ComfyClient, shot: dict[str, Any]) -> None:
         state = self.store.data
@@ -1951,11 +2475,15 @@ class Studio:
             tail = previous["tail_condition"]
         if tail["mode"] != mode:
             raise RuntimeError("Continuity mode changed within a checkpointed movie")
+        if tail.get("model_signature") != state["comfy"].get("model_signature"):
+            raise ValueError("Continuity model/VAE signature mismatch; refusing incompatible boundary conditioning")
         path = Path(tail["path"])
         if mode == "image":
             filename = retry(lambda: client.upload(path, f"{state['job_id']}_tail_{previous['shot_id']}"),
                              "Continuity frame upload", self.notice)
         else:
+            if settings.get("tensor_contract"):
+                inspect_terminal_latent(path, settings["tensor_contract"])
             filename = f"studio_{state['job_id']}_tail_{previous['shot_id']}{path.suffix}"
             atomic_bytes(Path(state["comfy"]["input_dir"]) / filename, path.read_bytes())
         self.checkpoint_shot(shot, continuity_input=filename, continuity_from=previous["shot_id"],
@@ -2117,6 +2645,22 @@ class Studio:
 
     def complete_movie(self, final: Path) -> None:
         state = self.store.data
+        # Keep every film under its own job, even as root/final_movie.mp4 is
+        # replaced by a later queued film. Hard links use no extra video storage.
+        archive = Path(state["folder"]) / "final_movie.mp4"
+        if final.resolve() != archive.resolve():
+            if archive.exists():
+                if digest(archive) != state["final_sha256"]:
+                    raise RuntimeError("Existing archived movie has a different checksum")
+            else:
+                try:
+                    os.link(final, archive)
+                except OSError:
+                    shutil.copyfile(final, archive)
+                fsync_directory(archive.parent)
+            final = archive
+            state["final_file"] = str(archive)
+            self.store.save()
         self.backup_final_movie(final)
         with self.store.lock:
             state.update(status="movie_complete", completed_at=utc())
@@ -2157,6 +2701,7 @@ class Studio:
                 with self.store.lock:
                     state.update(workflow=prepared["workflow"], comfy=prepared["comfy"],
                                  setup_pending=False, status="planning")
+                    state["auto_anchor_template"] = {"workflow": prepared["anchor_workflow"], "config": prepared["anchor_config"]}
                     if state["anchor"]["mode"] == "auto":
                         state["anchor"].update(workflow=prepared["anchor_workflow"], config=prepared["anchor_config"])
                     self.store.save()
@@ -2176,6 +2721,26 @@ class Studio:
                     bind_shot_consistency(state["shots"], state.get("comfy", {}).get("consistency", {}), state.get("master_seed", 0))
                     state["status"] = "rendering"
                     self.store.save()
+            if state.get("story_engine_version"):
+                stage = "story bible and authored continuity planning"
+                if not state.get("story_bible"):
+                    state["story_bible"] = build_story_bible(state["plot"], state.get("master_seed", 0), self.notice)
+                    self.store.save()
+                with self.store.lock:
+                    bind_world_state(state["shots"], state["story_bible"])
+                    state["capabilities"] = workflow_capabilities(state["comfy"])
+                    self.store.save()
+                atomic_json(Path(state["folder"]) / "story_bible.json", state["story_bible"])
+                atomic_json(Path(state["folder"]) / "continuity_plan.json", {
+                    "capabilities": state["capabilities"], "shots": [{"shot_id": s["shot_id"],
+                     "scene_id": s["scene_id"], "world_state": s["world_state"]} for s in state["shots"]]})
+                self.notice(f"Story ledger: {len(state['story_bible']['characters'])} characters; "
+                            f"{len(state['story_bible']['objects'])} recurring objects. Physics and lighting are authored constraints, not pixel-level guarantees.")
+                continuity = state["comfy"].get("consistency", {}).get("continuity", {})
+                strict = (state["comfy"].get("consistency", {}).get("require_native_latents", False)
+                          or os.getenv("STUDIO_REQUIRE_NATIVE_LATENTS", "0") == "1")
+                if strict and (continuity.get("mode") != "latent" or not continuity.get("tensor_contract")):
+                    raise SetupError("Strict native continuity needs a model-compatible terminal latent exporter, loader, and tensor_contract. The automatic Wan core profile cannot provide that contract.")
             with self.live_lock:
                 self.streams.clear()
             stage = "shot recovery, rendering, and assembly"
@@ -2198,6 +2763,8 @@ class Studio:
                     master = self.ensure_master_anchor(client)
                     reference = retry(lambda: client.upload(master, state["job_id"]),
                                       "Reference image upload", self.notice)
+                    if state.get("story_engine_version"):
+                        self.ensure_cast_references(client, master)
                     for shot in remaining:
                         if self.assembly_error:
                             raise RuntimeError("Assembly failed; stopping producer")
@@ -2225,7 +2792,11 @@ class Studio:
             stage = "final movie validation"
             final = self.root / "final_movie.mp4"
             pending = self.root / "final_movie.pending.mp4"
-            shutil.copyfile(self.root / "current_movie_stream.mp4", pending)
+            pending.unlink(missing_ok=True)
+            try:
+                os.link(self.root / "current_movie_stream.mp4", pending)
+            except OSError:
+                shutil.copyfile(self.root / "current_movie_stream.mp4", pending)
             if abs(probe(pending) - len(completed) * 5) > 0.5:
                 raise RuntimeError("Final movie duration is invalid")
             if state["media"].get("postproduction"):
@@ -2270,7 +2841,8 @@ class Studio:
                         self.store.save()
                 else:
                     try:
-                        self.teardown()
+                        if not self.schedule_next_queued():
+                            self.teardown()
                     except Exception as exc:
                         self.notice(f"Automatic shutdown ERROR ({type(exc).__name__}): check CONTAINER_ID, "
                                     "vastai CLI credentials, and shutdown.log. Movie remains saved locally.")
@@ -2353,15 +2925,19 @@ def build_app(studio: Studio) -> Any:
     def monitor() -> Iterator[tuple[Any, str, Any, str]]:
         cursor = 0
         delivered_final = None
+        observed_job = None
         # Newly attached browsers replay completed chunks once, then follow live.
         yield None, "Attaching to studio...", None, "Connecting"
         while True:
+            state = studio.store.snapshot()
+            if state.get("job_id") != observed_job:
+                observed_job = state.get("job_id")
+                cursor, delivered_final = 0, None
             with studio.live_lock:
                 logs = "\n".join(studio.lines)
                 clip = studio.streams[cursor] if cursor < len(studio.streams) else None
                 if clip:
                     cursor += 1
-            state = studio.store.snapshot()
             status = state.get("status", "idle")
             label = f"{status} | {len(state.get('completed_shot_ids', []))}/{state.get('shot_count', 0)} completed"
             # Do not accidentally expose a prior job's final movie while running.
@@ -2474,6 +3050,160 @@ def self_test() -> None:
     from unittest.mock import Mock, patch
 
     class Tests(unittest.TestCase):
+        def test_authored_storyboard_duration_and_scene_boundaries(self):
+            plot = json.dumps({"plot": "A traveler enters then leaves", "storyboard": [
+                {"scene_id": "arrival", "shots": ["Enters the station", "Waits by a window"]},
+                {"scene_id": "departure", "shots": ["Walks out"]}]})
+            shots = plan_shots(plot, 3, lambda _: None)
+            self.assertEqual([s["scene_id"] for s in shots], ["arrival", "arrival", "departure"])
+            with self.assertRaises(ValueError):
+                plan_shots(plot, 4, lambda _: None)
+
+        def test_verified_final_archives_before_queue_handoff_and_withholds_stop(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                folder = root / "run"
+                folder.mkdir()
+                final = root / "final_movie.mp4"
+                final.write_bytes(b"validated-test-movie")
+                studio = Studio(root, acquire_lock=False)
+                studio.store.data = {"schema": 1, "job_id": "job", "folder": str(folder), "shots": [], "partial": False,
+                    "movie_ready": True, "final_file": str(final), "final_sha256": digest(final), "cloud": {"provider": "None"}}
+                with patch("shutil.which", return_value="installed"), patch.object(studio, "schedule_next_queued", return_value=True) as handoff, \
+                     patch.object(studio, "teardown") as stop:
+                    studio.pipeline()
+                handoff.assert_called_once()
+                stop.assert_not_called()
+                self.assertEqual((folder / "final_movie.mp4").read_bytes(), final.read_bytes())
+                self.assertEqual(studio.store.data["final_file"], str(folder / "final_movie.mp4"))
+
+        def test_persistent_queue_is_idempotent_and_recovers_claims(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                queue_store = MovieQueue(Path(tmp))
+                first = queue_store.enqueue("A cinematic coastal story", 30)
+                self.assertEqual(first["id"], queue_store.enqueue("A cinematic coastal story", 30)["id"])
+                claimed = MovieQueue(Path(tmp)).claim()
+                self.assertEqual(claimed["id"], first["id"])
+                self.assertEqual(MovieQueue(Path(tmp)).claim()["id"], first["id"])
+                queue_store.started(first["id"], "job")
+                self.assertIsNone(queue_store.claim(first["id"]))
+                self.assertEqual(json.loads(queue_store.path.read_text())[0]["status"], "completed")
+
+        def test_queue_handoff_starts_next_job_without_teardown(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                studio.store.data = {"schema": 1, "job_id": "old", "status": "movie_complete", "shots": [], "partial": False}
+                MovieQueue(Path(tmp)).enqueue("Next film", 30)
+                def start(*args, **kwargs):
+                    studio.store.data = {"job_id": "new", "queued_request_id": kwargs["queued_request_id"]}
+                with patch.object(studio, "start", side_effect=start) as start_call, patch.object(studio, "teardown") as stop:
+                    self.assertTrue(studio.schedule_next_queued())
+                    thread = studio.handoff_thread
+                    if thread:
+                        thread.join(timeout=5)
+                    start_call.assert_called_once()
+                    stop.assert_not_called()
+                item = json.loads(MovieQueue(Path(tmp)).path.read_text())[0]
+                self.assertEqual(item["status"], "running")
+                self.assertEqual(item["job_id"], "new")
+
+        def test_attached_prop_follows_character_root_without_claiming_joint_dynamics(self):
+            bible = build_story_bible(json.dumps({"plot": "Mara walks.", "characters": [{"id": "mara", "name": "Mara"}],
+                "objects": [{"id": "beacon", "name": "Beacon", "attached_to": "mara", "attachment_offset_m": [0, 1, 0]}]}), 1, lambda _: None)
+            shots = structural_shots("Mara walks.", 2)
+            bind_world_state(shots, bible)
+            for shot in shots:
+                entities = shot["world_state"]["entities"]
+                self.assertEqual(entities["mara"]["end"]["position_m"][0], entities["beacon"]["end"]["position_m"][0])
+                self.assertEqual(entities["beacon"]["end"]["position_m"][1], 1)
+                self.assertIsNone(entities["beacon"]["end"]["energy_residual_j"])
+
+        def test_world_ledger_and_motion_boundaries_are_deterministic(self):
+            source = json.dumps({"plot": "Mara walks across a station.\nMara waits at a lighthouse.",
+                "characters": [{"id": "mara", "name": "Mara", "wardrobe": "blue coat", "psychology": "resolve and compassion"}],
+                "objects": [{"id": "beacon", "name": "Beacon", "appearance": "brass cylinder", "mass_kg": 2}]})
+            bible = build_story_bible(source, 123, lambda _: None)
+            self.assertEqual(bible["characters"][0]["seed"], 123)
+            shots = structural_shots(story_input(source)["plot"], 4)
+            bind_world_state(shots, bible)
+            first, second = shots[0]["world_state"], shots[1]["world_state"]
+            self.assertEqual(first["entities"]["mara"]["end"]["position_m"], second["entities"]["mara"]["start_position_m"])
+            self.assertEqual(first["lighting"], second["lighting"])
+            self.assertTrue(shots[2]["world_state"]["scene_boundary"])
+            frozen = json.dumps(shots, sort_keys=True)
+            bible["characters"][0]["wardrobe"] = "changed outfit"
+            bind_world_state(shots, bible)
+            self.assertEqual(json.dumps(shots, sort_keys=True), frozen)
+            self.assertIn("blue coat", shot_prompt(shots[0]))
+            self.assertIn("brass cylinder", shot_prompt(shots[0]))
+
+        def test_classical_energy_balance_and_inelastic_ground_contact(self):
+            free = advance_body([0, 100, 0], [2, 0, 0], 3, 2, ballistic=True)
+            self.assertAlmostEqual(free["position_m"][0], 4)
+            self.assertAlmostEqual(free["position_m"][1], 100 - 9.80665 * 2)
+            self.assertAlmostEqual(free["energy_residual_j"], 0)
+            impact = advance_body([0, 1, 0], [2, 0, 0], 3, 5, ballistic=True)
+            self.assertTrue(impact["ground_contact"])
+            self.assertEqual(impact["position_m"], [10.0, 0.0, 0.0])
+            self.assertEqual(impact["velocity_m_s"], [2.0, 0.0, 0.0])
+            self.assertAlmostEqual(impact["dissipated_energy_j"], 3 * 9.80665)
+            self.assertAlmostEqual(impact["energy_residual_j"], 0)
+            self.assertEqual(impact["mass_kg"], 3)
+            with self.assertRaises(ValueError):
+                advance_body([0, float("nan"), 0], [0, 0, 0], 3, 5)
+
+        def test_story_ledger_rejects_unsafe_or_conflicting_ids(self):
+            for source in [{"plot": "A story", "characters": [{"id": "../secret"}]},
+                           {"plot": "A story", "characters": [{"id": "a"}], "objects": [{"id": "a"}]},
+                           {"plot": "A story", "characters": [{"mass_kg": float("nan")}]}]:
+                with self.assertRaises(ValueError):
+                    build_story_bible(json.dumps(source), 0, lambda _: None)
+            with patch.dict(os.environ, {"LLM_MODEL": ""}):
+                bible = build_story_bible("Mara meets Ivo at a station.", 123, lambda _: None)
+            self.assertEqual([c["name"] for c in bible["characters"]], ["Mara", "Ivo"])
+
+        def test_terminal_tensor_contract_rejects_wrong_shape_and_nonfinite_values(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "boundary.latent"
+                contract = {"shape": [1, 1, 1, 1, 1], "dtype": "F16"}
+                header = json.dumps({"latent_tensor": {"dtype": "F16", "shape": contract["shape"], "data_offsets": [0, 2]}}).encode()
+                path.write_bytes(len(header).to_bytes(8, "little") + header + b"\x00\x00")
+                self.assertTrue(inspect_terminal_latent(path, contract)["finite"])
+                with self.assertRaises(ValueError):
+                    inspect_terminal_latent(path, {**contract, "shape": [1, 2, 1, 1, 1]})
+                path.write_bytes(len(header).to_bytes(8, "little") + header + b"\x00\x7e")
+                with self.assertRaisesRegex(ValueError, "NaN"):
+                    inspect_terminal_latent(path, contract)
+
+        def test_strict_native_policy_blocks_unsupported_workflow_before_rendering(self):
+            with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"LLM_MODEL": ""}):
+                studio = Studio(Path(tmp), acquire_lock=False)
+                studio.store.data = {"schema": 1, "job_id": "test", "folder": tmp, "plot": "A traveler walks through rain.",
+                    "story_engine_version": 1, "master_seed": 123, "shot_count": 2, "shots": [],
+                    "media": {}, "comfy": {"consistency": {"require_native_latents": True}}, "cloud": {"provider": "None"}}
+                with patch("shutil.which", return_value="installed"), patch.object(studio, "teardown") as teardown, \
+                     patch(__name__ + ".ComfyClient") as client:
+                    studio.pipeline()
+                client.assert_not_called()
+                teardown.assert_not_called()
+                self.assertEqual(studio.store.data["status"], "recoverable_error")
+                self.assertTrue(studio.store.data["shots"][0]["world_state"])
+                self.assertFalse(studio.store.data["capabilities"]["quantum_solver"])
+
+        def test_cast_reference_injection_does_not_replace_master(self):
+            graph = {"p": {"inputs": {"text": ""}}, "master": {"inputs": {"image": "master"}},
+                     "second": {"inputs": {"image": "second"}}, "s": {"inputs": {"seed": 0}}}
+            client = ComfyClient.__new__(ComfyClient)
+            client.config = {"prompt_node": "p", "prompt_input": "text", "image_node": "master", "image_input": "image",
+                "seed_node": "s", "seed_input": "seed", "character_bindings": [{"character_id": "ivo", "node": "second", "input": "image"}]}
+            submitted = []
+            client.submit_graph = lambda graph, marker: submitted.append(graph) or "prompt"
+            shot = structural_shots("Mara meets Ivo", 1)[0]
+            shot.update(seed=123, character_references={"ivo": "ivo.png"})
+            client.submit(graph, shot, "mara.png", "marker")
+            self.assertEqual(submitted[0]["master"]["inputs"]["image"], "mara.png")
+            self.assertEqual(submitted[0]["second"]["inputs"]["image"], "ivo.png")
+
         def test_sound_plan_uses_scene_context_and_stable_seeds(self):
             shot = {"shot_id": 2, "seed": 42, "visual_prompt": "Walking through rain beside a spaceship engine in the wind",
                     "identity_tokens": "ocean fire"}
@@ -3275,6 +4005,8 @@ def media_self_test() -> None:
             raw = root / f"raw_{shot['shot_id']:04d}.mp4"
             shutil.copyfile(source, raw)
             shot.update(seed=1234, status="rendered", attempts=1, raw_sha256=digest(raw))
+        bind_world_state(shots, build_story_bible(json.dumps({"plot": "Synthetic media test",
+            "characters": [{"id": "subject", "name": "Test subject"}]}), 1234, studio.notice))
         media = {"width": 640, "height": 360, "fps": 24, "postproduction": postproduction_config()}
         studio.store.data = {"schema": 1, "job_id": "media-test", "folder": str(root),
                              "shots": shots, "media": media, "master_shot_ids": []}
@@ -3326,6 +4058,8 @@ def main() -> None:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--media-self-test", action="store_true", help="Run real FFmpeg finishing tests without GPU/cloud/shutdown")
     parser.add_argument("--prepare", action="store_true", help="Prepare automatic workflows/models without rendering or shutdown")
+    parser.add_argument("--enqueue", metavar="PLOT_FILE", help="Queue a text/structured JSON plot after the active production")
+    parser.add_argument("--minutes", type=float, default=30, help="Duration for --enqueue (default: 30)")
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -3335,6 +4069,10 @@ def main() -> None:
         return
     root = Path(os.getenv("STUDIO_DIR", "/workspace")).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    if args.enqueue:
+        request = MovieQueue(root).enqueue(Path(args.enqueue).read_text(encoding="utf-8-sig"), args.minutes)
+        print(f"Queued {request['id']}: {request['minutes']} minutes; status={request['status']}; cloud backup=None")
+        return
     LOG.setLevel(logging.INFO)
     handler = RotatingFileHandler(root / "studio.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")
     os.chmod(root / "studio.log", 0o600)
@@ -3355,7 +4093,7 @@ def main() -> None:
         server_port=int(os.getenv("STUDIO_PORT", "7860")),
         auth=(username, password) if username else None,
         allowed_paths=[str(root / "public_media")],
-        blocked_paths=[str(root / "state.json"), str(root / "studio.log"), str(root / "credentials.key"),
+        blocked_paths=[str(root / "state.json"), str(root / "production_queue.json"), str(root / "studio.log"), str(root / "credentials.key"),
                        str(Path(os.getenv("GOOGLE_OAUTH_CLIENT_FILE", str(root / "google_oauth_client.json"))).resolve()),
                        str(Path(os.getenv("STUDIO_CREDENTIALS_FILE", str(root / ".credentials"))).resolve())])
 
