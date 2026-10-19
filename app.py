@@ -23,6 +23,35 @@ or AUTO_CHARACTER_CHECKPOINT=an_installed_SD_or_SDXL_checkpoint.safetensors
   Additional file-loader bindings (not adapter IMAGE sockets) can be configured:
   COMFY_IMAGE_BINDINGS='[{"node":"55","input":"image"}]'
   Same pixels/seed/settings reduce drift but cannot guarantee identical identity.
+Consistency stack (all settings are snapshotted in the movie checkpoint):
+  CONSISTENCY_CONFIG=/workspace/consistency.json  # optional JSON profile
+  IDENTITY_ADAPTER_WEIGHT=0.75  # 0.7–0.8, tunable starting point, not a universal optimum
+  CHARACTER_IDENTITY_TOKENS / MOVIE_STYLE_TOKENS / MOVIE_OBJECT_TOKENS override
+  the default immutable prompt anchors. scene_id controls adjacent-shot chaining.
+  Profile example (replace node IDs with actual exported API node IDs):
+  {"identity_weight":0.75,
+   "continuity":{"mode":"image","loader_node":"60","loader_input":"image",
+                 "target_node":"61","target_input":"start_image","loader_output":0},
+   "adapters":[], "motion_seed_span":0, "motion_seed_bindings":[],
+   "motion_parameters":[], "parameter_bindings":[]}
+  Existing IPAdapter nodes with weight inputs are detected automatically. Explicit
+  adapter entries use {"node":"45","parameters":{"weight":0.75},"links":{}}.
+  FaceID can additionally set weight_faceidv2=0.75 if that input exists.
+  WanVideoAddStandInLatent has NO weight socket; keep its reference VAE connected
+  to the master loader, and map ip_image_latent/freq_offset through links/parameters.
+  Continuity uses a SEPARATE loader from master identity. Image mode extracts the
+  last decoded frame, then the workflow re-encodes it for its I2V conditioning.
+  Native mode uses mode=latent, loader_input=latent, target_node/target_input and
+  output_node/output_key=latents. The model-specific graph must SELECT and SAVE
+  its final temporal latent window, not its full video latent. This app copies
+  that file unchanged; it never pretends an MP4 frame is an original latent.
+  At a scene boundary, latent mode retains the template's initial latent link.
+  Without a continuity mapping, temporal chaining is explicitly logged as off.
+  Identity seeds stay fixed. Optional motion_seed_bindings name separate motion
+  RNG inputs; small numeric seed deltas do not imply small noise differences.
+  For controlled motion-noise amplitude, motion_parameters entries accept
+  {"node":"70","input":"noise_aug_strength","base":0.02,"jitter":0.005}.
+  All undeclared scalar sampler/model settings remain fixed to the API template.
 Paths: STUDIO_DIR=/workspace COMFY_OUTPUT_DIR=/workspace/ComfyUI/output
 API: COMFY_URL=http://127.0.0.1:8188
 Local OpenAI-compatible LLM: LLM_URL=http://127.0.0.1:11434/v1
@@ -115,6 +144,162 @@ LOG = logging.getLogger("movie_studio")
 ATTEMPTS = 3
 TERMINAL = {"complete", "partial", "shutdown_scheduled"}
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/drive"]
+IDENTITY_ANCHOR = ("same face shape, same age, same hairstyle, same outfit silhouette, same accessories, "
+                   "same body proportions, matching the master reference character")
+STYLE_ANCHOR = ("same color palette, same rendering medium, same texture language, consistent lens and grading, "
+                "matching the style of the master reference character")
+OBJECT_ANCHOR = ("preserve recurring objects' geometry, markings, materials, scale and colors; "
+                 "no unexplained object substitutions")
+
+
+def shot_prompt(shot: dict[str, Any]) -> str:
+    """Keep immutable appearance instructions separate from scene/action text."""
+    return (f"SCENE ACTION: {shot.get('action_prompt', shot['visual_prompt'])}\n"
+            f"CAMERA: {shot['camera_movement']}. LIGHTING: {shot['lighting_cue']}.\n"
+            f"LOCKED IDENTITY: {shot.get('identity_tokens', IDENTITY_ANCHOR)}.\n"
+            f"LOCKED STYLE: {shot.get('style_tokens', STYLE_ANCHOR)}.\n"
+            f"LOCKED OBJECTS: {shot.get('object_tokens', OBJECT_ANCHOR)}.")
+
+
+def bind_shot_consistency(shots: list[dict[str, Any]], settings: dict[str, Any], master_seed: int) -> None:
+    for shot in shots:
+        # Do not silently change a checkpointed prompt or sampling seed on retry.
+        shot.setdefault("action_prompt", shot["visual_prompt"])
+        shot.setdefault("identity_tokens", settings.get("identity_tokens", IDENTITY_ANCHOR))
+        shot.setdefault("style_tokens", settings.get("style_tokens", STYLE_ANCHOR))
+        shot.setdefault("object_tokens", settings.get("object_tokens", OBJECT_ANCHOR))
+        shot.setdefault("scene_id", f"cut_{shot['shot_id']}")
+        shot.setdefault("seed", master_seed)
+        span = settings.get("motion_seed_span", 0)
+        # A small seed-number change is NOT a small perturbation of Gaussian noise.
+        # This is an optional separate motion RNG stream, never the identity seed.
+        offset = int.from_bytes(hashlib.sha256(f"{master_seed}:{shot['shot_id']}:motion".encode()).digest()[:8], "big")
+        shot.setdefault("motion_seed", (master_seed + (offset % (span + 1))) % (2**63))
+
+
+def consistency_config(graph: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    filename = os.getenv("CONSISTENCY_CONFIG")
+    settings = json.loads(Path(filename).read_text(encoding="utf-8")) if filename else {}
+    if not isinstance(settings, dict):
+        raise ValueError("CONSISTENCY_CONFIG must contain a JSON object")
+    settings.setdefault("identity_tokens", os.getenv("CHARACTER_IDENTITY_TOKENS", IDENTITY_ANCHOR))
+    settings.setdefault("style_tokens", os.getenv("MOVIE_STYLE_TOKENS", STYLE_ANCHOR))
+    settings.setdefault("object_tokens", os.getenv("MOVIE_OBJECT_TOKENS", OBJECT_ANCHOR))
+    for key in ("identity_tokens", "style_tokens", "object_tokens"):
+        if not isinstance(settings[key], str) or not settings[key].strip():
+            raise ValueError(f"Consistency {key} must be a nonempty string")
+    weight = float(settings.get("identity_weight", os.getenv("IDENTITY_ADAPTER_WEIGHT", "0.75")))
+    if not math.isfinite(weight) or not 0.7 <= weight <= 0.8:
+        raise ValueError("IDENTITY_ADAPTER_WEIGHT must be within 0.7–0.8")
+    adapters = settings.setdefault("adapters", [])
+    if not isinstance(adapters, list):
+        raise ValueError("Consistency adapters must be a list")
+    configured = {item.get("node") for item in adapters if isinstance(item, dict)}
+    for node_id, node in graph.items():
+        inputs, kind = node.get("inputs", {}), node.get("class_type", "")
+        if node_id not in configured and kind.startswith("IPAdapter") and type(inputs.get("weight")) in {int, float}:
+            parameters = {"weight": weight}
+            if "weight_faceidv2" in inputs:
+                parameters["weight_faceidv2"] = weight
+            adapters.append({"node": node_id, "parameters": parameters, "links": {}})
+        elif node_id not in configured and kind == "WanVideoAddStandInLatent":
+            # This node has ip_image_latent + freq_offset, NOT a weight input.
+            adapters.append({"node": node_id, "parameters": {}, "links": {}})
+
+    def validate_bindings(bindings: Any, numeric: bool = False) -> None:
+        if not isinstance(bindings, list):
+            raise ValueError("Consistency bindings must be JSON lists")
+        for item in bindings:
+            if (not isinstance(item, dict) or item.get("node") not in graph
+                    or item.get("input") not in graph[item["node"]].get("inputs", {})):
+                raise ValueError("Consistency binding references an unknown node/input")
+            value = graph[item["node"]]["inputs"][item["input"]]
+            if isinstance(value, list) or (numeric and type(value) not in {int, float}):
+                raise ValueError("Scalar consistency binding cannot overwrite a graph link")
+
+    for item in adapters:
+        if not isinstance(item, dict) or item.get("node") not in graph:
+            raise ValueError("Adapter mapping references an unknown node")
+        node = graph[item["node"]]
+        for field, value in item.get("parameters", {}).items():
+            validate_bindings([{"node": item["node"], "input": field}])
+            if not isinstance(value, (str, int, float, bool)) or (type(value) is float and not math.isfinite(value)):
+                raise ValueError("Adapter parameters must be finite scalar values")
+            if field in {"weight", "weight_faceidv2"} and (type(value) not in {int, float} or not 0.7 <= value <= 0.8):
+                raise ValueError("Identity adapter weights must be within 0.7–0.8")
+        for field, link in item.get("links", {}).items():
+            if (field not in node.get("inputs", {}) or not isinstance(link, list) or len(link) != 2
+                    or link[0] not in graph or type(link[1]) is not int or link[1] < 0):
+                raise ValueError("Adapter link must reference an existing compatible workflow output")
+    settings.setdefault("parameter_bindings", [])
+    validate_bindings(settings["parameter_bindings"])
+    for item in settings["parameter_bindings"]:
+        if "value" not in item or not isinstance(item["value"], (str, int, float, bool)):
+            raise ValueError("Locked parameter binding requires a scalar value")
+        if type(item["value"]) is float and not math.isfinite(item["value"]):
+            raise ValueError("Locked parameters must be finite")
+    settings.setdefault("motion_seed_bindings", [])
+    validate_bindings(settings["motion_seed_bindings"], numeric=True)
+    settings["motion_seed_span"] = int(settings.get("motion_seed_span", 0))
+    if not 0 <= settings["motion_seed_span"] <= 1024:
+        raise ValueError("motion_seed_span must be between 0 and 1024")
+    settings.setdefault("motion_parameters", [])
+    validate_bindings(settings["motion_parameters"], numeric=True)
+    for item in settings["motion_parameters"]:
+        if (not all(type(item.get(key)) in {int, float} and math.isfinite(item[key]) for key in ("base", "jitter"))
+                or not 0 <= item["jitter"] <= 0.05 or item["base"] < item["jitter"]):
+            raise ValueError("Motion-noise jitter must be finite, nonnegative, and <=0.05")
+    continuity = settings.setdefault("continuity", {})
+    if not isinstance(continuity, dict):
+        raise ValueError("Continuity settings must be a JSON object")
+    if not continuity:
+        # Safe discovery only: a distinct LoadImage already feeding an existing
+        # start_image socket. Never repurpose the immutable master loader.
+        excluded = {config["image_node"]} | {item["node"] for item in config.get("image_bindings", [])}
+        candidates = set()
+        for item in graph.values():
+            value = item.get("inputs", {}).get("start_image")
+            pending = [value[0]] if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str) else []
+            seen = set()
+            while pending:
+                node = pending.pop()
+                if node in seen or node not in graph:
+                    continue
+                seen.add(node)
+                inputs = graph[node].get("inputs", {})
+                if node not in excluded and graph[node].get("class_type") == "LoadImage" and isinstance(inputs.get("image"), str):
+                    candidates.add(node)
+                for link in inputs.values():
+                    if isinstance(link, list) and len(link) == 2 and isinstance(link[0], str):
+                        pending.append(link[0])
+        if len(candidates) == 1:
+            continuity.update(mode="image", loader_node=candidates.pop(), loader_input="image")
+    continuity.setdefault("mode", "image" if continuity.get("loader_node") else "off")
+    if continuity["mode"] not in {"off", "image", "latent"}:
+        raise ValueError("Continuity mode must be off, image, or latent")
+    if continuity["mode"] != "off":
+        loader = continuity.get("loader_node")
+        field = continuity.setdefault("loader_input", "image" if continuity["mode"] == "image" else "latent")
+        if loader == config["image_node"] or any(b["node"] == loader for b in config.get("image_bindings", [])):
+            raise ValueError("Continuity loader must be separate from immutable master-image loaders")
+        validate_bindings([{"node": loader, "input": field}])
+        if not isinstance(graph[loader]["inputs"][field], str):
+            raise ValueError("Continuity loader requires a filename string input")
+        if continuity.get("target_node"):
+            target = graph.get(continuity["target_node"], {}).get("inputs", {})
+            if continuity.get("target_input") not in target:
+                raise ValueError("Continuity target must name an existing image/latent input")
+        if continuity["mode"] == "latent" and (not continuity.get("target_node") or continuity.get("output_node") not in graph):
+            raise ValueError("Latent mode requires target_node/input and a saved final-latent output_node")
+        continuity.setdefault("loader_output", 0)
+        if type(continuity["loader_output"]) is not int or continuity["loader_output"] < 0:
+            raise ValueError("Continuity loader_output must be a nonnegative index")
+    # Snapshot all remaining scalar model/sampler parameters, including LoRAs,
+    # CFG, steps, scheduler and denoise. Only declared motion bindings may vary.
+    settings["scalar_snapshot"] = {node: {key: value for key, value in item.get("inputs", {}).items()
+                                        if isinstance(value, (str, int, float, bool))}
+                                   for node, item in graph.items()}
+    return settings
 
 
 def utc() -> str:
@@ -278,8 +463,10 @@ def structural_shots(plot: str, count: int) -> list[dict[str, Any]]:
               "raise the stakes", "reveal the turning point", "resolve the story"]
     shots = []
     for index in range(count):
-        beat = beats[min(len(beats) - 1, index * len(beats) // count)]
+        beat_index = min(len(beats) - 1, index * len(beats) // count)
+        beat = beats[beat_index]
         shots.append({"shot_id": index + 1,
+                      "scene_id": f"scene_{beat_index + 1}",
                       "visual_prompt": f"{beat}. Story beat: {phases[min(5, index * 6 // count)]}. "
                                        f"Sequential moment {index + 1} of {count}. Preserve character identity and costume.",
                       "camera_movement": ["slow dolly in", "tracking shot", "steady medium shot"][index % 3],
@@ -308,7 +495,8 @@ def plan_shots(plot: str, count: int, notice: Callable[[str], None]) -> list[dic
                     "messages": [{"role": "system", "content":
                         'You are a film director. Return only JSON {"shots": [...]}. '
                         "Each shot has visual_prompt, camera_movement, lighting_cue (nonempty strings), "
-                        "and duration_seconds=5. Maintain the same protagonist, costume, and locations. "
+                        "duration_seconds=5, and scene_id (stable string shared only by consecutive shots "
+                        "in the same time/place). Maintain the same protagonist, costume, recurring objects, and style. "
                         "Move the plot toward its ending over the requested total shot count."},
                         {"role": "user", "content": json.dumps({"plot": plot, "total_shots": count,
                             "start_shot": start + 1, "required_count": size, "previous_shots": shots[-4:]})}]})
@@ -325,9 +513,13 @@ def plan_shots(plot: str, count: int, notice: Callable[[str], None]) -> list[dic
                         for key in ("visual_prompt", "camera_movement", "lighting_cue")
                     ) or value.get("duration_seconds") != 5:
                         raise ValueError("Invalid LLM shot schema")
+                    scene_id = value.get("scene_id", f"cut_{start + offset + 1}")
+                    if not isinstance(scene_id, str) or not scene_id.strip() or len(scene_id) > 128:
+                        raise ValueError("LLM scene_id must be a nonempty string of at most 128 characters")
                     result.append({key: value[key] for key in
                                    ("visual_prompt", "camera_movement", "lighting_cue", "duration_seconds")}
-                                  | {"shot_id": start + offset + 1})
+                                  | {"shot_id": start + offset + 1,
+                                     "scene_id": scene_id.strip()})
                 return result
 
             shots.extend(retry(request_batch, "Storyboard planning", notice))
@@ -381,9 +573,12 @@ class ComfyClient:
 
     def submit(self, workflow: dict[str, Any], shot: dict[str, Any], reference: str, marker: str) -> str:
         graph = copy.deepcopy(workflow)
-        text = ("Use the master reference as the character and visual-style guide. Preserve the protagonist's "
-                "face, age, hairstyle, wardrobe, accessories, proportions, palette, and rendering style. "
-                f"{shot['visual_prompt']} Camera: {shot['camera_movement']}. Lighting: {shot['lighting_cue']}.")
+        settings = self.config.get("consistency", {})
+        for node, parameters in settings.get("scalar_snapshot", {}).items():
+            graph[node]["inputs"].update(copy.deepcopy(parameters))
+        for item in settings.get("parameter_bindings", []):
+            graph[item["node"]]["inputs"][item["input"]] = item["value"]
+        text = shot_prompt(shot)
         graph[self.config["prompt_node"]]["inputs"][self.config["prompt_input"]] = text
         graph[self.config["image_node"]]["inputs"][self.config["image_input"]] = reference
         for binding in self.config.get("image_bindings", []):
@@ -392,6 +587,23 @@ class ComfyClient:
             graph[self.config["seed_node"]]["inputs"][self.config["seed_input"]] = shot["seed"]
         for binding in self.config.get("seed_bindings", []):
             graph[binding["node"]]["inputs"][binding["input"]] = shot["seed"]
+        for item in settings.get("adapters", []):
+            graph[item["node"]]["inputs"].update(copy.deepcopy(item.get("parameters", {})))
+            graph[item["node"]]["inputs"].update(copy.deepcopy(item.get("links", {})))
+        for item in settings.get("motion_seed_bindings", []):
+            graph[item["node"]]["inputs"][item["input"]] = shot.get("motion_seed", shot["seed"])
+        for item in settings.get("motion_parameters", []):
+            value = int.from_bytes(hashlib.sha256(f"{shot['seed']}:{shot['shot_id']}:{item['node']}:{item['input']}".encode()).digest()[:8], "big")
+            graph[item["node"]]["inputs"][item["input"]] = item["base"] + item["jitter"] * (2 * value / (2**64 - 1) - 1)
+        continuity = settings.get("continuity", {})
+        filename = shot.get("continuity_input")
+        if continuity.get("mode") == "image":
+            graph[continuity["loader_node"]]["inputs"][continuity["loader_input"]] = filename or reference
+        if filename and continuity.get("mode") == "latent":
+            graph[continuity["loader_node"]]["inputs"][continuity["loader_input"]] = filename
+        if continuity.get("target_node") and (continuity["mode"] == "image" or filename):
+            graph[continuity["target_node"]]["inputs"][continuity["target_input"]] = [
+                continuity["loader_node"], continuity["loader_output"]]
         return self.submit_graph(graph, marker)
 
     def submit_graph(self, graph: dict[str, Any], marker: str) -> str:
@@ -508,6 +720,13 @@ def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
                                if name in {"seed", "noise_seed"} and type(value) is int]
     if not config["seed_node"] and not config["seed_bindings"]:
         raise ValueError("Video workflow must expose a literal seed/noise_seed, or configure COMFY_SEED_NODE / input")
+    config["consistency"] = consistency_config(graph, config)
+    for item in config["consistency"]["adapters"]:
+        graph[item["node"]]["inputs"].update(copy.deepcopy(item.get("links", {})))
+    continuity = config["consistency"]["continuity"]
+    if continuity["mode"] == "image" and continuity.get("target_node"):
+        graph[continuity["target_node"]]["inputs"][continuity["target_input"]] = [
+            continuity["loader_node"], continuity["loader_output"]]
     # Verify each mapped file loader actually contributes to the saved video.
     reachable, pending = set(), [config["video_node"]]
     while pending:
@@ -523,6 +742,28 @@ def workflow_config() -> tuple[dict[str, Any], dict[str, Any]]:
             raise ValueError("A configured master-image loader is disconnected from the video output")
         if not isinstance(graph[binding["node"]]["inputs"][binding["input"]], str):
             raise ValueError("Map image filenames to file-loader string inputs, not adapter IMAGE sockets")
+    if continuity["mode"] == "image" and continuity["loader_node"] not in reachable:
+        raise ValueError("Continuity image loader must contribute to the saved video output")
+    for adapter in config["consistency"]["adapters"]:
+        if adapter["node"] not in reachable:
+            raise ValueError("Configured identity adapter / stand-in node is disconnected from the video output")
+        item = graph[adapter["node"]]
+        field = "ip_image_latent" if item.get("class_type") == "WanVideoAddStandInLatent" else "image"
+        if field not in item.get("inputs", {}):
+            continue  # Precomputed-embedding adapters keep their exported graph contract.
+        link = item["inputs"][field]
+        upstream, pending = set(), [link[0]] if isinstance(link, list) and len(link) == 2 else []
+        while pending:
+            node = pending.pop()
+            if node in upstream or node not in graph:
+                continue
+            upstream.add(node)
+            for value in graph[node].get("inputs", {}).values():
+                if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str):
+                    pending.append(value[0])
+        masters = {config["image_node"]} | {binding["node"] for binding in config["image_bindings"]}
+        if not upstream.intersection(masters):
+            raise ValueError("Adapter reference image/latent must be connected to an immutable master-image loader")
     return graph, config
 
 
@@ -1112,6 +1353,7 @@ class Studio:
         folder = Path(state["folder"])
         raw = folder / f"raw_{shot['shot_id']:04d}.mp4"
         if shot.get("status") == "rendered" and raw.is_file() and shot.get("raw_sha256") == digest(raw):
+            self.capture_continuity(client, shot, raw)
             return raw
         # A lost checkpoint after copying raw output can be recovered from its
         # persisted prompt ID; raw is copied again, never counted twice.
@@ -1139,6 +1381,7 @@ class Studio:
                     os.fsync(handle.fileno())
                 os.replace(pending, raw)
                 self.checkpoint_shot(shot, status="rendered", raw_sha256=digest(raw))
+                self.capture_continuity(client, shot, raw)
                 return raw
             except Exception as exc:
                 self.notice(f"Shot {shot['shot_id']} attempt {shot['attempts']}/3 failed ({type(exc).__name__}).")
@@ -1158,6 +1401,89 @@ class Studio:
         self.checkpoint_shot(shot, status="failed")
         self.notice(f"Shot {shot['shot_id']} exhausted three attempts; skipping and continuing.")
         return None
+
+    def capture_continuity(self, client: ComfyClient, shot: dict[str, Any], raw: Path) -> None:
+        settings = self.store.data.get("comfy", {}).get("consistency", {}).get("continuity", {})
+        mode = settings.get("mode", "off")
+        if mode == "off":
+            return
+        cached = shot.get("tail_condition", {})
+        if (cached.get("source_sha256") == shot.get("raw_sha256") and cached.get("path")
+                and Path(cached["path"]).is_file() and digest(Path(cached["path"])) == cached.get("sha256")):
+            return
+        folder = Path(self.store.data["folder"])
+        if mode == "image":
+            target = folder / f"tail_{shot['shot_id']:04d}.png"
+            temporary = target.with_name(target.stem + ".pending.png")
+
+            def extract() -> None:
+                # Decode the final second through EOF, then reverse that small
+                # window. The first output is the actual last decoded frame.
+                run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-sseof", "-1",
+                     "-i", str(raw), "-map", "0:v:0", "-vf", "reverse", "-frames:v", "1", "-an", str(temporary)])
+                if not temporary.is_file() or temporary.stat().st_size < 8:
+                    raise RuntimeError("Final-frame extraction produced no image")
+                atomic_bytes(target, temporary.read_bytes())
+
+            retry(extract, f"Shot {shot['shot_id']} final-frame extraction", self.notice)
+        else:
+            # Native latent mode NEVER infers tensors from encoded video. The
+            # graph must explicitly select/save its model-specific final latent.
+            record = client.request("GET", f"/history/{shot['prompt_id']}").get(shot["prompt_id"], {})
+            items = record.get("outputs", {}).get(settings["output_node"], {}).get(settings.get("output_key", "latents"), [])
+            root = Path(self.store.data["comfy"]["output_dir"]).resolve()
+            paths = set()
+            for item in items:
+                if not isinstance(item, dict) or item.get("type", "output") != "output":
+                    continue
+                source = (root / item.get("subfolder", "") / item.get("filename", "")).resolve()
+                if not source.is_relative_to(root):
+                    raise ValueError("Latent exporter returned a path outside ComfyUI output")
+                if source.suffix.lower() in {".latent", ".safetensors"} and source.is_file():
+                    paths.add(source)
+            if len(paths) != 1:
+                raise ValueError("Native continuity exporter must report exactly one final-latent file")
+            source = paths.pop()
+            target = folder / f"tail_{shot['shot_id']:04d}{source.suffix}"
+            atomic_bytes(target, source.read_bytes())
+        self.checkpoint_shot(shot, tail_condition={"mode": mode, "path": str(target), "sha256": digest(target),
+                            "source_sha256": shot["raw_sha256"], "captured_at": utc()})
+
+    def prepare_continuity(self, client: ComfyClient, shot: dict[str, Any]) -> None:
+        state = self.store.data
+        settings = state.get("comfy", {}).get("consistency", {}).get("continuity", {})
+        mode = settings.get("mode", "off")
+        if mode == "off":
+            return
+        if shot.get("consistency_prepared") and (shot.get("status") in {"submitting", "submitted", "rendered"}
+                                                or shot.get("retry_prompt_id") or shot.get("reconcile_marker")):
+            return  # Retry/reconciliation must retain the original API payload.
+        previous = next((item for item in state["shots"] if item["shot_id"] == shot["shot_id"] - 1), None)
+        linked = (previous and previous.get("scene_id") == shot.get("scene_id")
+                  and previous.get("status") in {"rendered", "completed"})
+        if not linked:
+            self.checkpoint_shot(shot, continuity_input=None, continuity_from=None, consistency_prepared=True)
+            self.notice(f"Shot {shot['shot_id']}: scene boundary / unavailable predecessor; reset temporal conditioning.")
+            return
+        tail = previous.get("tail_condition", {})
+        if not tail or not Path(tail.get("path", "")).is_file() or digest(Path(tail["path"])) != tail.get("sha256"):
+            raw = Path(state["folder"]) / f"raw_{previous['shot_id']:04d}.mp4"
+            if not raw.is_file() or digest(raw) != previous.get("raw_sha256"):
+                raise RuntimeError("Cannot recover preceding shot's continuity condition without its verified raw clip")
+            self.capture_continuity(client, previous, raw)
+            tail = previous["tail_condition"]
+        if tail["mode"] != mode:
+            raise RuntimeError("Continuity mode changed within a checkpointed movie")
+        path = Path(tail["path"])
+        if mode == "image":
+            filename = retry(lambda: client.upload(path, f"{state['job_id']}_tail_{previous['shot_id']}"),
+                             "Continuity frame upload", self.notice)
+        else:
+            filename = f"studio_{state['job_id']}_tail_{previous['shot_id']}{path.suffix}"
+            atomic_bytes(Path(state["comfy"]["input_dir"]) / filename, path.read_bytes())
+        self.checkpoint_shot(shot, continuity_input=filename, continuity_from=previous["shot_id"],
+                            continuity_sha256=tail["sha256"], consistency_prepared=True)
+        self.notice(f"Shot {shot['shot_id']}: {mode} continuity chained from Shot {previous['shot_id']}; master identity unchanged.")
 
     def assemble(self) -> None:
         """Called only by the consumer. Reconcile playlist from durable shot state."""
@@ -1318,12 +1644,14 @@ class Studio:
                 for shot in shots:
                     shot.update(status="pending", attempts=0,
                                 seed=state.get("master_seed", uuid.uuid4().int % (2**63)))
+                bind_shot_consistency(shots, state.get("comfy", {}).get("consistency", {}), state.get("master_seed", 0))
                 with self.store.lock:
                     state["shots"] = shots
                     state["status"] = "rendering"
                     self.store.save()
             else:
                 with self.store.lock:
+                    bind_shot_consistency(state["shots"], state.get("comfy", {}).get("consistency", {}), state.get("master_seed", 0))
                     state["status"] = "rendering"
                     self.store.save()
             with self.live_lock:
@@ -1336,12 +1664,24 @@ class Studio:
             try:
                 remaining = [s for s in state["shots"] if s["status"] not in {"completed", "failed"}]
                 if remaining:
+                    profile = state.get("comfy", {}).get("consistency", {})
+                    self.notice(f"Consistency stack: {len(profile.get('adapters', []))} adapter/stand-in mappings; "
+                                f"temporal chaining={profile.get('continuity', {}).get('mode', 'off')}; locked identity/style/object prompts.")
+                    if profile.get("continuity", {}).get("mode", "off") == "off":
+                        self.notice("Temporal chaining is disabled: configure a separate start-frame/latent loader in CONSISTENCY_CONFIG.")
                     master = self.ensure_master_anchor(client)
                     reference = retry(lambda: client.upload(master, state["job_id"]),
                                       "Reference image upload", self.notice)
                     for shot in remaining:
                         if self.assembly_error:
                             raise RuntimeError("Assembly failed; stopping producer")
+                        try:
+                            self.prepare_continuity(client, shot)
+                        except Exception as exc:
+                            self.checkpoint_shot(shot, status="failed", last_error=type(exc).__name__)
+                            self.notice(f"Shot {shot['shot_id']}: continuity preparation failed "
+                                        f"({type(exc).__name__}); skipping this shot and resetting the next chain.")
+                            continue
                         raw = self.render_shot(client, shot, reference)
                         if raw:
                             work.put((shot, raw))
@@ -1591,6 +1931,153 @@ def self_test() -> None:
     from unittest.mock import Mock, patch
 
     class Tests(unittest.TestCase):
+        def test_continuity_discovery_never_repurposes_master(self):
+            graph = {"master": {"class_type": "LoadImage", "inputs": {"image": "master.png"}},
+                     "tail": {"class_type": "LoadImage", "inputs": {"image": "tail.png"}},
+                     "i2v": {"inputs": {"start_image": ["tail", 0]}}}
+            with patch.dict(os.environ, {"CONSISTENCY_CONFIG": ""}):
+                profile = consistency_config(graph, {"image_node": "master"})
+                self.assertEqual(profile["continuity"]["loader_node"], "tail")
+                graph["i2v"]["inputs"]["start_image"] = ["master", 0]
+                profile = consistency_config(graph, {"image_node": "master"})
+                self.assertEqual(profile["continuity"]["mode"], "off")
+
+        def test_prompt_anchors_survive_scene_changes_and_resume(self):
+            shots = structural_shots("Arrival\nDeparture", 4)
+            bind_shot_consistency(shots, {"identity_tokens": "fixed face", "style_tokens": "fixed palette",
+                                          "object_tokens": "brass compass"}, 123)
+            before = shot_prompt(shots[0])
+            bind_shot_consistency(shots, {"identity_tokens": "changed configuration"}, 999)
+            self.assertEqual(shot_prompt(shots[0]), before)
+            self.assertEqual([shot["seed"] for shot in shots], [123] * 4)
+            for shot in shots:
+                self.assertIn("LOCKED IDENTITY: fixed face", shot_prompt(shot))
+                self.assertIn("LOCKED STYLE: fixed palette", shot_prompt(shot))
+                self.assertIn("LOCKED OBJECTS: brass compass", shot_prompt(shot))
+            self.assertEqual(shots[0]["scene_id"], shots[1]["scene_id"])
+            self.assertNotEqual(shots[1]["scene_id"], shots[2]["scene_id"])
+
+        def test_adapter_schema_and_separate_continuity_loader(self):
+            graph = {"master": {"inputs": {"image": "master.png"}},
+                     "face": {"class_type": "IPAdapterFaceID", "inputs": {"weight": 1.0, "weight_faceidv2": 1.0}},
+                     "wan": {"class_type": "WanVideoAddStandInLatent", "inputs": {"freq_offset": 1}}}
+            with patch.dict(os.environ, {"CONSISTENCY_CONFIG": "", "IDENTITY_ADAPTER_WEIGHT": "0.75"}):
+                config = consistency_config(graph, {"image_node": "master"})
+            face = next(a for a in config["adapters"] if a["node"] == "face")
+            wan = next(a for a in config["adapters"] if a["node"] == "wan")
+            self.assertEqual(face["parameters"], {"weight": 0.75, "weight_faceidv2": 0.75})
+            self.assertNotIn("weight", wan["parameters"])
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "profile.json"
+                for profile in [{"adapters": [{"node": "wan", "parameters": {"weight": 0.75}}]},
+                                {"continuity": {"mode": "image", "loader_node": "master"}}]:
+                    path.write_text(json.dumps(profile))
+                    with patch.dict(os.environ, {"CONSISTENCY_CONFIG": str(path)}), self.assertRaises(ValueError):
+                        consistency_config(graph, {"image_node": "master"})
+
+        def test_scene_continuity_reuses_checkpoint_and_resets_at_cuts(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                frame = Path(tmp) / "tail_0001.png"
+                frame.write_bytes(b"last-frame")
+                shots = structural_shots("Arrival\nDeparture", 4)
+                for shot in shots:
+                    shot.update(status="pending", seed=123)
+                shots[0].update(status="completed", tail_condition={"mode": "image", "path": str(frame), "sha256": digest(frame)})
+                studio.store.data = {"schema": 1, "folder": tmp, "job_id": "test", "shots": shots,
+                    "comfy": {"consistency": {"continuity": {"mode": "image"}}}}
+                client = Mock()
+                client.upload.return_value = "previous-frame.png"
+                studio.prepare_continuity(client, shots[1])
+                self.assertEqual(shots[1]["continuity_from"], 1)
+                self.assertEqual(shots[1]["continuity_input"], "previous-frame.png")
+                studio.checkpoint_shot(shots[1], status="submitted")
+                reloaded = Studio(Path(tmp), acquire_lock=False)
+                reloaded.prepare_continuity(client, reloaded.store.data["shots"][1])
+                client.upload.assert_called_once()
+                studio.prepare_continuity(client, shots[2])
+                self.assertIsNone(shots[2]["continuity_from"])
+                shots[0]["status"] = "failed"
+                shots[1].update(status="pending", consistency_prepared=False)
+                studio.prepare_continuity(client, shots[1])
+                self.assertIsNone(shots[1]["continuity_input"])
+
+        def test_native_latent_continuity_copies_exact_export(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "output").mkdir()
+                source = root / "output" / "last.latent"
+                source.write_bytes(b"model-specific-final-latent")
+                raw = root / "raw_0001.mp4"
+                raw.write_bytes(b"video")
+                shots = structural_shots("One scene", 2)
+                shots[0].update(status="rendered", raw_sha256=digest(raw), prompt_id="prompt")
+                shots[1].update(status="pending")
+                studio = Studio(root, acquire_lock=False)
+                studio.store.data = {"schema": 1, "folder": tmp, "job_id": "test", "shots": shots,
+                    "comfy": {"input_dir": str(root / "input"), "output_dir": str(root / "output"),
+                              "consistency": {"continuity": {"mode": "latent", "output_node": "export"}}}}
+                client = Mock()
+                client.request.return_value = {"prompt": {"outputs": {"export": {"latents": [
+                    {"filename": "last.latent", "type": "output"}]}}}}
+                studio.capture_continuity(client, shots[0], raw)
+                studio.prepare_continuity(client, shots[1])
+                restored = root / "input" / shots[1]["continuity_input"]
+                self.assertEqual(restored.read_bytes(), source.read_bytes())
+                self.assertEqual(shots[1]["continuity_from"], 1)
+                client.upload.assert_not_called()
+
+        def test_continuity_payload_preserves_master_and_parameter_locks(self):
+            graph = {"prompt": {"inputs": {"text": ""}}, "master": {"inputs": {"image": "master.png"}},
+                     "tail": {"inputs": {"image": "tail.png"}},
+                     "adapter": {"inputs": {"weight": 1.0, "image": ["master", 0]}},
+                     "sampler": {"inputs": {"seed": 0, "steps": 24, "noise_aug_strength": 0.02}}}
+            settings = {"scalar_snapshot": {"sampler": {"steps": 24}},
+                "adapters": [{"node": "adapter", "parameters": {"weight": 0.75}}],
+                "motion_parameters": [{"node": "sampler", "input": "noise_aug_strength", "base": 0.02, "jitter": 0.005}],
+                "continuity": {"mode": "image", "loader_node": "tail", "loader_input": "image"}}
+            client = ComfyClient.__new__(ComfyClient)
+            client.config = {"prompt_node": "prompt", "prompt_input": "text", "image_node": "master", "image_input": "image",
+                "seed_node": "sampler", "seed_input": "seed", "consistency": settings}
+            submitted = []
+            client.submit_graph = lambda graph, marker: submitted.append(graph) or "prompt"
+            shots = structural_shots("One scene", 2)
+            bind_shot_consistency(shots, {}, 123)
+            shots[1]["continuity_input"] = "prior-end-frame.png"
+            for shot in shots:
+                client.submit(graph, shot, "immutable-master.png", "marker")
+            self.assertEqual(submitted[0]["tail"]["inputs"]["image"], "immutable-master.png")
+            self.assertEqual(submitted[1]["tail"]["inputs"]["image"], "prior-end-frame.png")
+            for payload in submitted:
+                self.assertEqual(payload["master"]["inputs"]["image"], "immutable-master.png")
+                self.assertEqual(payload["adapter"]["inputs"]["weight"], 0.75)
+                self.assertEqual(payload["sampler"]["inputs"]["seed"], 123)
+                self.assertEqual(payload["sampler"]["inputs"]["steps"], 24)
+                self.assertTrue(0.015 <= payload["sampler"]["inputs"]["noise_aug_strength"] <= 0.025)
+            client.submit(graph, shots[1], "immutable-master.png", "retry")
+            self.assertEqual(submitted[1], submitted[2])
+
+        def test_native_latent_payload_bootstraps_before_chaining(self):
+            graph = {"text": {"inputs": {"text": ""}}, "master": {"inputs": {"image": "master.png"}},
+                     "tail": {"inputs": {"latent": "unused.latent"}}, "empty": {"inputs": {}},
+                     "sampler": {"inputs": {"seed": 0, "latent_image": ["empty", 0]}}}
+            client = ComfyClient.__new__(ComfyClient)
+            client.config = {"prompt_node": "text", "prompt_input": "text", "image_node": "master", "image_input": "image",
+                "seed_node": "sampler", "seed_input": "seed", "consistency": {"continuity": {
+                    "mode": "latent", "loader_node": "tail", "loader_input": "latent", "loader_output": 0,
+                    "target_node": "sampler", "target_input": "latent_image"}}}
+            payloads = []
+            client.submit_graph = lambda graph, marker: payloads.append(graph) or "prompt"
+            shots = structural_shots("One scene", 2)
+            bind_shot_consistency(shots, {}, 123)
+            client.submit(graph, shots[0], "fixed-master.png", "first")
+            shots[1]["continuity_input"] = "previous-final.latent"
+            client.submit(graph, shots[1], "fixed-master.png", "second")
+            self.assertEqual(payloads[0]["sampler"]["inputs"]["latent_image"], ["empty", 0])
+            self.assertEqual(payloads[1]["sampler"]["inputs"]["latent_image"], ["tail", 0])
+            self.assertEqual(payloads[1]["tail"]["inputs"]["latent"], "previous-final.latent")
+            self.assertEqual(payloads[1]["master"]["inputs"]["image"], "fixed-master.png")
+
         def test_auto_anchor_created_once_and_recovered(self):
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
