@@ -1,0 +1,93 @@
+CINEMATIC ORCHESTRATION UPGRADE — IMPLEMENTATION AND VERIFICATION RECORD
+
+Baseline inspected on 2026-10-20
+Existing app, wrappers, dependency manifest, SSH tunnel, checkpoints, queue,
+ComfyUI object schemas, GPU, installed packages, model files, free space and
+supervisor configuration were inspected before modification. Existing generation,
+streaming previews, optional anchors, profile ledger, checkpoint recovery,
+cloud delivery, history/deletion and queued shutdown behavior were retained.
+Baseline: 59 passing self-tests. Active film The Last Light, job
+cbc54b56fa8f4bef9ecb1360f8284a2b, 120 tasks/600 seconds; initially 97 completed.
+RTX PRO 6000 Blackwell Max-Q, about 96 GB VRAM; only 4.77 GiB disk free.
+Torch 2.10.0+cu130, Gradio 6.30.0 and FFmpeg 6.1.1 already installed.
+
+Files
+app.py: additive orchestration, variable task durations, native audio retention,
+reference preparation, paid-task journal/recovery, review/versioning, pause,
+delivery controls, decode gate and startup dependency verification.
+cinematic_engine.py: capability registry, structural/optional LLM direction,
+scene/take/task planner, reference budgets, motion compiler, official H3 adapter,
+and manifest-driven dependency inspector/installer.
+test_cinematic_engine.py: orchestration/provider/dependency/revision tests.
+test_media_acceptance.py: real media and full orchestration acceptance; ComfyUI
+generation alone is mocked to avoid interfering with the live GPU queue.
+requirements.txt: packaging and Pillow constraints added to the existing manifest.
+.env.example: placeholders only. OPERATIONS.txt: startup/configuration/recovery.
+orchestration_audit.json: machine-readable baseline. .gitignore: backups/staging.
+Earlier tunnel and 10-minute request changes were preserved, not overwritten.
+
+Implemented behavior
+Adaptive continuous/dialogue/action coverage, stable shot IDs, scene durations,
+logical take boundaries, shot dependencies, cast-aware references, editable plan,
+versioned approved frames and targeted shot regeneration. The same plan drives
+the existing sequential worker/media consumer. Legacy running jobs retain their
+saved execution path and five-second media assumptions. New jobs use actual
+task durations for audio, finishing, assembly and final validation.
+Official H3/H3-Max provider contracts are separated from local H3 base variants.
+Reference endpoints cannot mix with identity/video/audio reference roles.
+Required assets are not silently dropped when the model budget is exceeded.
+Documented H3 limits are enforced conservatively, with checksum/dimension/media
+inspection before encoding a request. Uncertain paid POST outcomes halt safely.
+ContextIR and whitelist-only 2K regeneration are optional journaled stages.
+No authentication credential or media Base64 is logged in diagnostics.
+
+Verification record before final rollout
+The first isolated remote candidate passed all 59 existing self-tests and 21 new
+tests, plus the real media self-test (two clips, procedural sound, scope finishing,
+AAC sync, HD export, preview transport, toggles and checkpoint recovery).
+A separate real FFmpeg synthetic test preserved 32 kHz native-source audio,
+normalized it to 48 kHz stereo AAC and assembled 4+11-second clips to 15 seconds.
+Gradio 6.30.0 built, launched on isolated localhost:7864, and answered an actual
+gradio_client planning request with 60 seconds/12 local tasks. The active film
+remained rendering at 108/120, with identical job ID. Final test/rollout evidence
+is saved separately in deployment_verification.json when performed.
+
+Final rollout verified on 2026-10-20 at 18:58 UTC
+59 existing + 27 new tests passed on the final candidate. A second isolated
+Gradio planning request passed. The existing setup pipeline installed the missing
+google-auth-oauthlib package and verified the environment. The remote backup is
+/workspace/movie-maker/.backups/deployment-20261020-185814/.
+Only movie-studio was restarted; ComfyUI continued rendering. HTTP 200, the new
+UI controls and inspect-plan API were verified. The same job resumed at 111/120;
+clip hashes, master anchor, shot count and shutdown policy were preserved. Chrome
+subsequently displayed the new UI, real clip preview and 112/120 completed.
+Access verified at http://localhost:7860/ through the existing SSH helper.
+Both permanent real-media acceptance tests passed on the deployed host (7.568s):
+new orchestration plan through reference selection, worker, real finishing/mux,
+full decode QC, checkpoint/final hash, local retention and disabled teardown;
+plus variable-duration native-source audio assembly. ComfyUI rendering in that
+acceptance test was mocked, not billed or reported as a fresh model generation.
+The real ongoing production advanced to 113/120 during these checks.
+
+Unavailable or unverified capabilities
+No usable MiniMax credential was found and no H3 weights were found. Real H3
+generation, ContextIR, 2K regeneration, provider billing, native dialogue/eyelines
+and provider output CDN retrieval were not exercised; contract tests are mocks.
+Local H3 runtime integration remains unverified; no inference readiness is inferred
+from node registration. Large model downloads were withheld for storage safety.
+There is no installed vision identity/lip-sync evaluator, generative music model,
+semantic object-permanence enforcement or physically exact rendering guarantee.
+The deterministic ledger constrains the authored plan, not the generated pixels.
+New angles can use uploaded approved compositions; automatic per-angle keyframe
+synthesis/vision approval is not implemented. The default WAN graph has no native
+terminal-latent contract or separate identity-and-temporal conditioner; its
+existing explicit limitation remains. 4K resize does not imply native 4K detail.
+Live Google/Dropbox uploads were not tested with account credentials; existing
+checksum/retry tests are retained. Local Windows has no FFmpeg/GPU runtime;
+real media validation runs on the existing remote environment.
+
+Truthful scope
+This is a tested incremental integration, not evidence that every aspirational
+capability in the master prompt has been achieved. External credentials, local
+H3 weights/runtime qualification, compatible native latent workflows, semantic
+vision QC and actual provider generation remain distinct readiness gates.

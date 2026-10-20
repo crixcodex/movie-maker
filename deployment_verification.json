@@ -1,0 +1,145 @@
+{
+  "checked_at": "2026-10-20T19:03:18.294337+00:00",
+  "tests": [
+    {
+      "command": [
+        "app.py",
+        "--self-test"
+      ],
+      "exit": 0
+    },
+    {
+      "command": [
+        "-m",
+        "unittest",
+        "test_cinematic_engine",
+        "-q"
+      ],
+      "exit": 0
+    },
+    {
+      "command": [
+        "-m",
+        "unittest",
+        "test_media_acceptance",
+        "-v"
+      ],
+      "exit": 0
+    }
+  ],
+  "real_h3_generation": false,
+  "readiness": {
+    "python": "3.12.14",
+    "packages": [
+      {
+        "name": "gradio",
+        "version": "6.30.0",
+        "state": "ready",
+        "essential": true
+      },
+      {
+        "name": "requests",
+        "version": "2.34.2",
+        "state": "ready",
+        "essential": true
+      },
+      {
+        "name": "cryptography",
+        "version": "50.0.2",
+        "state": "ready",
+        "essential": true
+      },
+      {
+        "name": "packaging",
+        "version": "26.3",
+        "state": "ready",
+        "essential": true
+      },
+      {
+        "name": "Pillow",
+        "version": "12.3.0",
+        "state": "ready",
+        "essential": false
+      },
+      {
+        "name": "google-api-python-client",
+        "version": "2.201.0",
+        "state": "ready",
+        "essential": false
+      },
+      {
+        "name": "google-auth-httplib2",
+        "version": "0.4.4",
+        "state": "ready",
+        "essential": false
+      },
+      {
+        "name": "google-auth-oauthlib",
+        "version": "1.5.0",
+        "state": "ready",
+        "essential": false
+      },
+      {
+        "name": "dropbox",
+        "version": "12.2.3",
+        "state": "ready",
+        "essential": false
+      }
+    ],
+    "tools": {
+      "ffmpeg": "ready",
+      "ffprobe": "ready"
+    },
+    "ready": true,
+    "generation_ready": true,
+    "codecs": {
+      "libx264": "ready",
+      "aac": "ready"
+    },
+    "checked_at": "2026-10-20T19:03:26.665699+00:00",
+    "storage": {
+      "free_bytes": 4991328256,
+      "large_model_install": "separate existing installer checks required size before download"
+    },
+    "gpu": {
+      "availability": "detected",
+      "devices": [
+        "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 97887 MiB, 610.57.04"
+      ],
+      "runtime": "existing driver/runtime preserved; model compatibility verified by backend execution"
+    },
+    "provider_configuration": {
+      "minimax_enabled": false,
+      "minimax_credential_present": false,
+      "live_generation_verified": false
+    }
+  },
+  "staged_gradio_planning": {
+    "http_status": 200,
+    "duration_seconds": 60,
+    "tasks": 12
+  },
+  "backup": "/workspace/movie-maker/.backups/deployment-20261020-190328",
+  "deployment": {
+    "verified": true,
+    "http_status": 200,
+    "job_id": "cbc54b56fa8f4bef9ecb1360f8284a2b",
+    "status": "rendering",
+    "completed": 114,
+    "target": 120,
+    "legacy_preserved": true,
+    "shutdown_policy_preserved": true,
+    "inspection_api_verified": true
+  },
+  "sha256": {
+    "app.py": "a2157e9346f7b95d9d522f7200c2dcd586c255f061b556a9f1a2ad7a0a0aaae4",
+    "cinematic_engine.py": "4e5396377bdfdab212db9fc457e8f8bdbd0ce2d5d6292fd7a851c20a763fe14a",
+    "test_cinematic_engine.py": "ce9949f5721eaa8a1263081c683bbf19c90e86d3ac3c454d878635ef5161146c",
+    "test_media_acceptance.py": "22ff86de7e017deb159ea1072a49e16278e17b06532165940c30b436fb9703ea",
+    "requirements.txt": "c67e952aa64b6a354d2b117d77ba752d87f67e1ebb4aeda47978c010a92a5a76",
+    ".env.example": "17be994b6ff958525a414d1ffc6f39afcf0f330341e494e3f756821361607467",
+    "orchestration_audit.json": "953f27edc0ac85f50fc0935c916ffcd2b151f76a1a19329e86360176180e4f39",
+    "OPERATIONS.txt": "75895f88eed5b67710267a2e8ce713f748eef987fcb8709c1630610aa8922cbb",
+    "IMPLEMENTATION_REPORT.txt": "c08edb2841c1fae3e2e4b89143df06e7116efc5bb00c3d9504c8f9d0d3fbc8f7"
+  }
+}

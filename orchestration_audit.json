@@ -1,0 +1,53 @@
+{
+  "audit_date": "2026-10-20",
+  "phase": "baseline before orchestration changes",
+  "local_backup": ".backups/orchestration-20261020-113114",
+  "baseline_tests": {"existing_unit_tests_passed": 59},
+  "architecture": {
+    "entrypoint": "app.py:main -> build_app -> Studio",
+    "planner": "plan_shots: authored JSON, optional local LLM, structural fallback",
+    "execution": "single coordinator thread, bounded queue, one FFmpeg consumer",
+    "recovery": "atomic state.json, OS workspace lock, saved provider markers and clip checksums",
+    "provisioning": "automatic_workflow -> provision_model; existing requirements.txt and setup lock",
+    "storage": "local verified copy/hard link, Google OAuth2, Dropbox verified upload",
+    "review": "history previews and protected deletion; no original cinematic plan editor"
+  },
+  "verified_runtime": {
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "gpu_memory_mib": 97887,
+    "free_disk_gib_at_audit": 4.77,
+    "gradio": "6.30.0",
+    "torch": "2.10.0+cu130",
+    "ffmpeg": "6.1.1",
+    "comfy_internal_port": 18188,
+    "gradio_internal_port": 7860,
+    "production_completed_at_audit": 97,
+    "production_target": 120,
+    "h3_nodes_registered": true,
+    "h3_weights_found": false,
+    "minimax_credential_environment_names_found": [],
+    "real_h3_generation_verified": false
+  },
+  "risks": [
+    "An active production must retain its workflow and checkpoint schema.",
+    "Registered H3 nodes do not imply installed compatible weights.",
+    "Free disk cannot safely accommodate a new large H3 installation.",
+    "Official provider POST does not document a replay-safe idempotency key; ambiguous submissions need task recovery.",
+    "No installed vision evaluator or speech recognizer has been verified; visual and dialogue quality cannot be scored objectively.",
+    "Existing native latent chaining requires a model-compatible exported graph; it is not universal."
+  ],
+  "incremental_changes": [
+    "Add cinematic_engine.py behind new-job orchestration settings; retain old APIs/checkpoints.",
+    "Extend the existing dependency manifest/setup lock rather than replace model provisioning.",
+    "Add capability-based planning and official H3 V2 adapter with reference budgets and safe submission journaling.",
+    "Make duration/audio/assembly use checkpointed shot durations while keeping old five-second defaults.",
+    "Add plan inspection, editable drafts, versioned uploaded keyframes, review, pause and targeted regeneration.",
+    "Validate a staged replacement and real FFmpeg processing before service rollout."
+  ],
+  "primary_sources": [
+    "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
+    "https://platform.minimax.io/docs/api-reference/video-generation-v2-query",
+    "https://platform.minimax.io/docs/api-reference/video-generation-v2-list",
+    "https://github.com/MiniMax-AI/MiniMax-H3"
+  ]
+}

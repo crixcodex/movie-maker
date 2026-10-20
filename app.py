@@ -1,7 +1,7 @@
-"""Autonomous AI Movie Studio -- one Python file, Python 3.11+.
+"""Autonomous AI Movie Studio -- Python 3.11+; cinematic_engine.py required.
 
 Install:
-  pip install gradio requests cryptography google-api-python-client google-auth-httplib2 google-auth-oauthlib dropbox
+  python -m pip install -r requirements.txt
   # Install ffmpeg/ffprobe separately; install/configure vastai for teardown.
 
 Automatic first-run setup (default when no workflow file exists):
@@ -115,7 +115,12 @@ Media: MOVIE_WIDTH=1920 MOVIE_HEIGHT=1080 MOVIE_FPS=24
   jobs stay silent/non-graded. PCM segments are concatenated before master AAC
   encoding to prevent cumulative encoder-delay drift across long movies.
 
-Cloud backup is optional (provider None by default). Google sign-in setup:
+Storage Destination selects Local PC Storage (the UI default), Google Drive,
+Dropbox, or None. Local delivery saves a checksum-verified, uniquely named MP4
+to ./movie_output/ on the application host. A remote GPU host cannot write
+directly to the browser user's PC; use the Final movie download for that.
+None retains the working master. Existing jobs keep their checkpoint policy.
+Google sign-in setup:
   Enable the Google Drive API in your Google Cloud project, configure its OAuth
   consent screen, and create a Desktop app OAuth client. Download its client JSON.
   GOOGLE_OAUTH_CLIENT_FILE=/workspace/google_oauth_client.json
@@ -194,10 +199,23 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Iterator
 from urllib.parse import parse_qs, urlsplit
+from cinematic_engine import (CinematicBrain, Capability, ReferenceBudget, MiniMaxH3,
+                              ProviderError, registry, compile_motion, dependency_report)
 
 
 LOG = logging.getLogger("movie_studio")
 ATTEMPTS = 3
+
+
+def shot_seconds(shot: dict[str, Any]) -> int:
+    value = shot.get("duration_seconds", 5)
+    if type(value) is not int or not 1 <= value <= 15:
+        raise ValueError("Invalid checkpoint shot duration")
+    return value
+
+
+def movie_seconds(shots: list[dict[str, Any]]) -> int:
+    return sum(shot_seconds(s) for s in shots)
 TERMINAL = {"complete", "partial", "shutdown_scheduled"}
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 IDENTITY_ANCHOR = ("same face shape, same age, same hairstyle, same outfit silhouette, same accessories, "
@@ -210,6 +228,8 @@ OBJECT_ANCHOR = ("preserve recurring objects' geometry, markings, materials, sca
 
 def shot_prompt(shot: dict[str, Any]) -> str:
     """Keep immutable appearance instructions separate from scene/action text."""
+    if shot.get("compiled_prompt"):
+        return shot["compiled_prompt"]
     return (f"SCENE ACTION: {shot.get('action_prompt', shot['visual_prompt'])}\n"
             f"CAMERA: {shot['camera_movement']}. LIGHTING: {shot['lighting_cue']}.\n"
             f"LOCKED IDENTITY: {shot.get('identity_tokens', IDENTITY_ANCHOR)}.\n"
@@ -343,7 +363,7 @@ def advance_body(position: list[float], velocity: list[float], mass: float, seco
     quantum entanglement, PINN training, or diffusion-gradient guidance occurs.
     """
     position, velocity = vector3(position), vector3(velocity, 1000)
-    if not math.isfinite(seconds) or not 0 < seconds <= 5 or not math.isfinite(mass) or mass <= 0:
+    if not math.isfinite(seconds) or not 0 < seconds <= 15 or not math.isfinite(mass) or mass <= 0:
         raise ValueError("Invalid trajectory duration or mass")
     if position[1] < 0 or (not ballistic and abs(velocity[1]) > 1e-9):
         raise ValueError("Invalid grounded trajectory")
@@ -407,7 +427,7 @@ def bind_world_state(shots: list[dict[str, Any]], bible: dict[str, Any]) -> None
             ballistic = bool(re.search(r"\b(falling|freefall|free-fall)\b", scene_text)) and mentioned
             if not ballistic:
                 requested_velocity[1] = 0.0
-            end = advance_body(position, requested_velocity, entity["mass_kg"], 5, ballistic)
+            end = advance_body(position, requested_velocity, entity["mass_kg"], shot_seconds(shot), ballistic)
             impulse = [entity["mass_kg"] * (requested_velocity[i] - velocity[i]) for i in range(3)]
             entities[entity["id"]] = {"start_position_m": position, "start_velocity_m_s": requested_velocity,
                                       "authored_impulse_ns": impulse, "end": end}
@@ -831,16 +851,17 @@ def sound_layers(plan: dict[str, Any]) -> list[str]:
     return layers
 
 
-def validate_pcm(path: Path) -> None:
+def validate_pcm(path: Path, seconds: int = 5) -> None:
     with wave.open(str(path), "rb") as audio:
-        if (audio.getframerate(), audio.getnchannels(), audio.getsampwidth(), audio.getnframes()) != (48000, 2, 2, 240000):
-            raise ValueError("Sound segment must contain exactly five seconds of stereo 48 kHz PCM")
+        if (audio.getframerate(), audio.getnchannels(), audio.getsampwidth(), audio.getnframes()) != (48000, 2, 2, seconds * 48000):
+            raise ValueError("Sound segment must match the shot duration in stereo 48 kHz PCM")
 
 
 def generate_sound(shot: dict[str, Any], target: Path, settings: dict[str, Any],
                    notice: Callable[[str], None]) -> dict[str, Any]:
     plan = audio_plan(shot)
-    sources = sound_layers(plan)
+    duration = shot_seconds(shot)
+    sources = [source.replace("d=5", f"d={duration}") for source in sound_layers(plan)]
     notice(f"Shot {shot['shot_id']}: sound design — {', '.join(plan['cues'])}; mixing {len(sources)} layers.")
     args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-filter_complex_threads", "1"]
     for source in sources:
@@ -857,8 +878,8 @@ def generate_sound(shot: dict[str, Any], target: Path, settings: dict[str, Any],
         labels.append(f"[layer{index}]")
     filters.append("".join(labels) + f"amix=inputs={len(sources)}:duration=longest:normalize=0,"
         f"loudnorm=I={settings['loudness_lufs']}:TP={settings['true_peak_db']}:LRA=7,"
-        "aresample=48000,afade=t=in:st=0:d=0.05,afade=t=out:st=4.88:d=0.12,"
-        "apad=whole_len=240000,atrim=end_sample=240000,asetpts=N/SR/TB[mix]")
+        f"aresample=48000,afade=t=in:st=0:d=0.05,afade=t=out:st={duration-0.12}:d=0.12,"
+        f"apad=whole_len={duration*48000},atrim=end_sample={duration*48000},asetpts=N/SR/TB[mix]")
     pending = target.with_suffix(".pending.wav")
     args += ["-filter_complex", ";".join(filters), "-map", "[mix]", "-c:a", "pcm_s16le",
              "-ar", "48000", "-ac", "2", str(pending)]
@@ -866,14 +887,14 @@ def generate_sound(shot: dict[str, Any], target: Path, settings: dict[str, Any],
     # A deterministic clean room-tone retry is the fallback if a cue fails.
     try:
         run(args, timeout=120)
-        validate_pcm(pending)
+        validate_pcm(pending, duration)
     except Exception as exc:
         notice(f"Shot {shot['shot_id']}: layered sound failed ({type(exc).__name__}); using a clean ambient bed.")
         run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
-             f"anoisesrc=r=48000:d=5:c=pink:a=0.05:s={plan['seed']}",
-             "-af", "highpass=f=80,lowpass=f=700,afade=t=in:d=0.05,afade=t=out:st=4.88:d=0.12",
-             "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-t", "5", str(pending)], timeout=120)
-        validate_pcm(pending)
+             f"anoisesrc=r=48000:d={duration}:c=pink:a=0.05:s={plan['seed']}",
+             "-af", f"highpass=f=80,lowpass=f=700,afade=t=in:d=0.05,afade=t=out:st={duration-0.12}:d=0.12",
+             "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-t", str(duration), str(pending)], timeout=120)
+        validate_pcm(pending, duration)
         plan["fallback"] = "ambient_bed"
     with pending.open("r+b") as handle:
         os.fsync(handle.fileno())
@@ -905,8 +926,9 @@ def normalize(source: Path, target: Path, media: dict[str, Any],
               shot: dict[str, Any] | None = None,
               notice: Callable[[str], None] = lambda _: None) -> dict[str, Any]:
     seconds = probe(source)
-    if abs(seconds - 5) > 0.25:
-        raise ValueError(f"Workflow generated {seconds:.2f}s; expected five seconds")
+    duration = shot_seconds(shot or {})
+    if abs(seconds - duration) > 0.25:
+        raise ValueError(f"Workflow generated {seconds:.2f}s; expected {duration} seconds")
     fps = media["fps"]
     settings = media.get("postproduction", {})
     details: dict[str, Any] = {}
@@ -914,7 +936,19 @@ def normalize(source: Path, target: Path, media: dict[str, Any],
     if settings.get("audio"):
         if not shot:
             raise ValueError("Sound design requires the checkpointed shot description")
-        details["audio_plan"] = generate_sound(shot, audio, settings, notice)
+        native = bool(shot.get("native_audio"))
+        if native:
+            try:
+                run(["ffmpeg","-hide_banner","-loglevel","error","-y","-i",str(source),"-map","0:a:0",
+                     "-af",f"aresample=48000,apad=whole_len={duration*48000},atrim=end_sample={duration*48000},asetpts=N/SR/TB",
+                     "-t",str(duration),"-ar","48000","-ac","2","-c:a","pcm_s16le",str(audio)])
+                validate_pcm(audio,duration)
+                details["audio_plan"] = {"source":"provider_native","dialogue_assessment":"not_measured"}
+            except Exception:
+                native = False
+                notice("Native soundtrack missing/unreadable; procedural ambience fallback cannot reproduce dialogue.")
+        if not native:
+            details["audio_plan"] = generate_sound(shot, audio, settings, notice)
         details["audio_sha256"] = digest(audio)
     temporary = target.with_suffix(".pending.mp4")
     # Pad slightly short source clips so every successful shot is exactly 5s.
@@ -924,7 +958,7 @@ def normalize(source: Path, target: Path, media: dict[str, Any],
                  "-b:a", settings["audio_bitrate"], "-ar", "48000", "-ac", "2"]
     else:
         args += ["-map", "0:v:0", "-an"]
-    args += ["-vf", video_filters(media, (shot or {}).get("seed", 0)), "-t", "5", "-c:v", "libx264",
+    args += ["-vf", video_filters(media, (shot or {}).get("seed", 0)), "-t", str(duration), "-c:v", "libx264",
              "-threads", str(settings.get("threads", 4)), "-preset", settings.get("preset", "veryfast"),
              "-crf", str(settings.get("crf", 18)), "-pix_fmt", "yuv420p", "-r", str(fps),
              "-video_track_timescale", "90000"]
@@ -935,7 +969,7 @@ def normalize(source: Path, target: Path, media: dict[str, Any],
         args += ["-maxrate", f"{settings['maxrate_mbps']}M", "-bufsize", f"{settings['bufsize_mbit']}M"]
     args += ["-movflags", "+faststart", str(temporary)]
     run(args)
-    if abs(probe(temporary) - 5) > 0.1:
+    if abs(probe(temporary) - duration) > 0.1:
         raise RuntimeError("Normalized shot duration is invalid")
     os.replace(temporary, target)
     with target.open("r+b") as handle:
@@ -951,6 +985,39 @@ def preview(clip: Path) -> Path:
          "-c", "copy", "-bsf:v", "h264_mp4toannexb", "-f", "mpegts", str(pending)])
     os.replace(pending, target)
     return target
+
+
+_BROWSER_PREVIEW_LOCK = threading.Lock()
+
+
+def browser_preview(source: Path) -> Path:
+    """Small, seekable playback proxy; never modify the full-quality master.
+
+    Source stat identity changes when a progressive snapshot is replaced, so
+    browsers cannot accidentally reuse a stale cached preview.
+    """
+    if os.getenv("STUDIO_PREVIEW_PROXY", "1") == "0":
+        return source
+    stat = source.stat()
+    key = hashlib.sha256(f"{source}:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:20]
+    target = source.parent / f"browser_preview_{key}.mp4"
+    with _BROWSER_PREVIEW_LOCK:
+        if target.is_file() and target.stat().st_size:
+            return target
+        pending = target.with_suffix(".pending.mp4")
+        try:
+            run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+                 "-map", "0:v:0", "-map", "0:a:0?", "-vf", "scale=512:-2", "-r", "12",
+                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "29", "-threads", "2",
+                 "-maxrate", "450k", "-bufsize", "900k", "-g", "12", "-sc_threshold", "0",
+                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "64k", "-ac", "2",
+                 "-movflags", "+faststart", str(pending)])
+            if abs(probe(pending) - probe(source)) > 0.5:
+                raise RuntimeError("Browser preview duration does not match its source")
+            os.replace(pending, target)
+        finally:
+            pending.unlink(missing_ok=True)
+        return target
 
 
 class WorkspaceLock:
@@ -1259,6 +1326,8 @@ class ComfyClient:
         timeout = float(os.getenv("SHOT_TIMEOUT", "7200"))
         deadline, heartbeat = time.monotonic() + timeout, 0.0
         failures = 0
+        missing_since: float | None = None
+        presence_check = 0.0
         while time.monotonic() < deadline:
             try:
                 record = self.request("GET", f"/history/{prompt_id}").get(prompt_id)
@@ -1279,6 +1348,23 @@ class ComfyClient:
                     raise ValueError("ComfyUI execution failed or was interrupted")
                 if status.get("completed"):
                     return self.output_image(record, output_node) if kind == "image" else self.video(record)
+            # ComfyUI's queue/history are memory-only. A backend restart can
+            # erase a persisted prompt ID; waiting two hours cannot recover it.
+            # Require repeated absence plus a second history read to avoid the
+            # normal queue-to-history handoff race. Never interrupt other jobs.
+            now = time.monotonic()
+            if not record and now >= presence_check:
+                pending = self.request("GET", "/queue")
+                present = any(len(item) > 1 and str(item[1]) == prompt_id
+                              for item in pending.get("queue_running", []) + pending.get("queue_pending", []))
+                if present or self.request("GET", f"/history/{prompt_id}").get(prompt_id):
+                    missing_since = None
+                elif missing_since is None:
+                    missing_since = now
+                elif now - missing_since >= 30:
+                    notice("Saved prompt disappeared from ComfyUI queue and history; retrying this shot after backend restart.")
+                    raise ValueError("ComfyUI lost the saved prompt; a new submission is required")
+                presence_check = now + 10
             if time.monotonic() >= heartbeat:
                 notice(f"Waiting for ComfyUI prompt {prompt_id}...")
                 heartbeat = time.monotonic() + 20
@@ -1549,6 +1635,51 @@ def provision_model(models: Path, spec: tuple[str, ...], notice: Callable[[str],
     fsync_directory(target.parent)
     notice(f"Model installed and verified: {target.name}")
     return target.name
+
+
+def provision_dependencies(root: Path, notice: Callable[[str], None], install: bool = False) -> dict[str, Any]:
+    """Extend the existing setup lock/manifest; do not upgrade working runtimes."""
+    with_lock = WorkspaceLock(root / "setup")
+    try:
+        notice("Checking dependency manifest and installed versions.")
+        report = dependency_report(Path(__file__).with_name("requirements.txt"), install=install, notice=notice)
+        if install and any(v == "missing" for v in report.get("tools",{}).values()):
+            if sys.platform.startswith("linux") and hasattr(os,"geteuid") and os.geteuid() == 0 and shutil.which("apt-get"):
+                notice("Installing missing FFmpeg system package using the existing OS package manager.")
+                try:
+                    subprocess.run(["apt-get","install","-y","ffmpeg"],check=True,capture_output=True,timeout=300)
+                except (OSError,subprocess.SubprocessError):
+                    notice("FFmpeg installation failed; generation stays unavailable until the system package is installed.")
+                report["tools"] = {name:"ready" if shutil.which(name) else "missing" for name in ("ffmpeg","ffprobe")}
+            else:
+                notice("FFmpeg is missing; automatic OS installation is unavailable in this environment.")
+        if shutil.which("ffmpeg"):
+            try:
+                encoders = run(["ffmpeg","-hide_banner","-encoders"],timeout=15)
+                report["codecs"] = {name:"ready" if name in encoders else "missing" for name in ("libx264","aac")}
+            except Exception:
+                report["codecs"] = {"inspection":"failed"}
+        report["generation_ready"] = (report.get("ready",False)
+            and all(v == "ready" for v in report.get("tools",{}).values())
+            and all(v == "ready" for v in report.get("codecs",{}).values()))
+        report["checked_at"] = utc()
+        report["storage"] = {"free_bytes":shutil.disk_usage(root).free,
+            "large_model_install":"separate existing installer checks required size before download"}
+        report["gpu"] = {"availability":"not_detected","runtime":"not_modified"}
+        if shutil.which("nvidia-smi"):
+            try:
+                devices = run(["nvidia-smi","--query-gpu=name,memory.total,driver_version","--format=csv,noheader"],timeout=15)
+                report["gpu"] = {"availability":"detected","devices":devices.strip().splitlines(),
+                    "runtime":"existing driver/runtime preserved; model compatibility verified by backend execution"}
+            except Exception:
+                report["gpu"]["availability"] = "inspection_failed"
+        report["provider_configuration"] = {"minimax_enabled":os.getenv("MINIMAX_ENABLED","0")=="1",
+            "minimax_credential_present":bool(os.getenv("MINIMAX_API_KEY")),"live_generation_verified":False}
+        atomic_json(root / "runtime_readiness.json",report)
+        notice("Dependency verification complete; generation " + ("ready." if report["generation_ready"] else "has unresolved prerequisites."))
+        return report
+    finally:
+        with_lock.close()
 
 
 def automatic_workflow(root: Path, notice: Callable[[str], None]) -> dict[str, Any]:
@@ -2028,7 +2159,7 @@ def upload_cloud(store: StateStore, movie: Path, notice: Callable[[str], None]) 
                 "algorithm": "md5", "bytes": local_size, "verified_at": utc()}
 
     import dropbox
-    path = folder.rstrip("/") + f"/{state['job_id']}_final_movie.mp4"
+    path = folder.rstrip("/") + f"/{state.get('delivery_id', state['job_id'])}_final_movie.mp4"
     checksum = dropbox_hash(movie)
     try:
         remote = client.files_get_metadata(path)
@@ -2069,13 +2200,14 @@ class Studio:
         self.live_lock = threading.Lock()
         self.streams: list[str] = []
         self.assembly_error: BaseException | None = None
+        self.history_lock = threading.RLock()
 
     def notice(self, message: str) -> None:
         LOG.info(message)
         with self.live_lock:
             self.lines.append(f"[{utc()}] {message}")
 
-    def publish_media(self, source: Path) -> Path:
+    def publish_media(self, source: Path, job_id: str | None = None) -> Path:
         """Serve only media, never grant Gradio access to private checkpoints.
 
         Hard links avoid duplicating large movies on the same filesystem. A
@@ -2083,7 +2215,7 @@ class Studio:
         """
         if source.suffix.lower() not in {".mp4", ".ts"}:
             raise ValueError("Only finished video media can be published")
-        target = self.root / "public_media" / self.store.data["job_id"] / source.name
+        target = self.root / "public_media" / (job_id or self.store.data["job_id"]) / source.name
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.is_file() and os.path.samefile(source, target):
             return target
@@ -2096,6 +2228,94 @@ class Studio:
         os.replace(pending, target)
         return target
 
+    def history_folder(self, job_id: str) -> Path:
+        """Resolve only direct run directories; never accept a caller's path."""
+        if not re.fullmatch(r"[a-f0-9]{32}", job_id or ""):
+            raise ValueError("Select a production from history")
+        parent = self.root / "runs"
+        folder = parent / job_id
+        if parent.resolve() != parent or folder.resolve() != folder or not folder.is_dir():
+            raise ValueError("Production folder is missing or redirects outside history")
+        return folder
+
+    def history(self) -> tuple[list[tuple[str, str]], str]:
+        with self.history_lock:
+            entries = []
+            parent = self.root / "runs"
+            if parent.is_dir() and parent.resolve() == parent:
+                for folder in sorted(parent.iterdir(), key=lambda p: p.name):
+                    try:
+                        folder = self.history_folder(folder.name)
+                        final = folder / "final_movie.mp4"
+                        active = folder.name == self.store.data.get("job_id")
+                        stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(folder.stat().st_mtime))
+                        state = "current production — protected" if active else "finished" if final.is_file() else "unfinished"
+                        size = final.stat().st_size / 2**20 if final.is_file() else 0
+                        entries.append((f"{stamp} | {folder.name[:8]} | {state} | master {size:.1f} MiB", folder.name))
+                    except (OSError, ValueError):
+                        continue
+            free = shutil.disk_usage(self.root).free / 2**30
+            return entries, f"Host disk free: {free:.2f} GiB. Dates are UTC. Select a production to preview or download."
+
+    def history_media(self, job_id: str) -> tuple[str | None, str]:
+        with self.history_lock:
+            folder = self.history_folder(job_id)
+            if job_id == self.store.data.get("job_id") and not self.store.data.get("movie_ready"):
+                source = self.root / "current_movie_stream.mp4"
+                # Use a stable snapshot name; the producer atomically replaces
+                # its master while this hard link remains a playable version.
+            else:
+                source = folder / "final_movie.mp4"
+            if not source.is_file() or source.is_symlink():
+                return None, "This production has no assembled movie yet. Use the live preview for available shots."
+            if (self.root / "public_media").resolve() != self.root / "public_media":
+                raise ValueError("Media directory redirects outside this workspace")
+            target_folder = self.root / "public_media" / job_id
+            if target_folder.resolve() != target_folder:
+                raise ValueError("Media folder redirects outside this workspace")
+            published = self.publish_media(source, job_id=job_id)
+            return str(published), "Preview snapshot ready. Download it below; refresh to see newly completed shots."
+
+    def delete_history(self, job_id: str, confirmed: bool) -> str:
+        if not confirmed:
+            raise ValueError("Confirm deletion of the selected production first")
+        # Serialize with job launch/handoff and other history operations.
+        with self.guard, self.history_lock:
+            folder = self.history_folder(job_id)
+            if job_id == self.store.data.get("job_id"):
+                raise ValueError("The current checkpoint is protected, including after completion")
+            queue_path = self.root / "production_queue.json"
+            if queue_path.exists():
+                items = json.loads(queue_path.read_text(encoding="utf-8"))
+                if any(item.get("job_id") == job_id and item.get("status") in {"starting", "running"} for item in items):
+                    raise ValueError("A production referenced by the active queue is protected")
+            public = self.root / "public_media" / job_id
+            output = Path.cwd().resolve() / "movie_output" / f"{job_id}_final_movie.mp4"
+            targets = [folder] + ([public] if public.exists() else [])
+            # Validate every resolved path before any recursive deletion. Refuse
+            # symlinks/junctions instead of following them on either OS.
+            for target in targets:
+                if target.resolve() != target:
+                    raise ValueError("Refusing to delete a redirected production directory")
+                for current, dirs, files in os.walk(target, followlinks=False):
+                    for name in dirs + files:
+                        entry = Path(current) / name
+                        if entry.resolve() != entry:
+                            raise ValueError("Production contains redirected files; automatic deletion refused")
+            if output.exists() and output.resolve() != output:
+                raise ValueError("Local output redirects outside its directory")
+            before = shutil.disk_usage(self.root).free
+            for target in targets:
+                shutil.rmtree(target)
+            if output.is_file():
+                output.unlink()
+            freed = max(0, shutil.disk_usage(self.root).free - before) / 2**20
+            message = (f"Deleted production {job_id[:8]} and its published previews/local export; "
+                       f"reclaimed {freed:.1f} MiB on the workspace disk. "
+                       "ComfyUI source outputs and cloud copies are retained.")
+            self.notice(message)
+            return message
+
     def running(self) -> bool:
         return bool((self.thread and self.thread.is_alive()) or (self.handoff_thread and self.handoff_thread.is_alive()))
 
@@ -2106,6 +2326,9 @@ class Studio:
         self.thread.start()
 
     def resume(self) -> None:
+        if self.store.data.get("status") == "paused":
+            self.notice("Production is paused; use Attach / Resume Checkpoint to continue.")
+            return
         if self.store.data and self.store.data.get("status") not in TERMINAL:
             self.notice("Interrupted checkpoint detected; automatically resuming.")
             self.launch()
@@ -2146,7 +2369,7 @@ class Studio:
     def start(self, plot: str, image: str | None, minutes: float, provider: str,
               destination: str, secret: str, shutdown: bool = True,
               google_credentials: str = "", sound_design: bool = True, cinematic: bool = True,
-              queued_request_id: str | None = None) -> None:
+              queued_request_id: str | None = None, orchestration: dict[str, Any] | None = None) -> None:
         with self.guard:
             if self.running() and threading.current_thread() is not self.handoff_thread:
                 raise ValueError("A movie is already running; attach to the current job")
@@ -2157,17 +2380,26 @@ class Studio:
                 raise ValueError("Provide a movie plot")
             story_input(plot)  # Validate structured input before creating a job.
             render_settings = validated_render_settings(story_input(plot).get("render_settings", {}))
+            delivery = (orchestration or {}).get("delivery", "story")
+            if delivery in {"hd","2k","4k"}:
+                render_settings.update(dict(zip(("width","height"),
+                    {"hd":(1280,720),"2k":(2048,1152),"4k":(3840,2160)}[delivery])))
             count = int(round(float(minutes) * 60 / 5))
             if not 1 <= count <= 720:
                 raise ValueError("Duration must be between five seconds and 60 minutes")
             provider = provider or "None"
             secret = secret or ""
-            if provider not in {"None", "Google Drive", "Dropbox"}:
-                raise ValueError("Select a cloud provider")
+            if provider not in {"Local PC Storage", "None", "Google Drive", "Dropbox"}:
+                raise ValueError("Select a storage destination")
+            storage_provider = provider
+            if provider == "Local PC Storage":
+                provider = "None"  # Local delivery has no cloud credentials.
             destination = (destination or "").strip()
             if provider == "Google Drive" and google_credentials:
                 destination = destination or "root"
                 secret = google_credentials
+            if provider == "Dropbox":
+                destination = destination or "/"
             if provider == "Dropbox" and destination != "/":
                 destination = destination.rstrip("/")
             # Provision missing workflow/models in the coordinator, never inside
@@ -2231,7 +2463,11 @@ class Studio:
                     "retain_raw_copies": render_settings.get("retain_raw_copies", True),
                     "preview_container": render_settings.get("preview_container", "ts"),
                     "postproduction": finishing},
-                "cloud": cloud, "shutdown": True, "master_shot_ids": []}
+                "storage": {"provider": storage_provider, "status": "pending",
+                            "directory": str((Path.cwd() / "movie_output").resolve())
+                            if storage_provider == "Local PC Storage" else None},
+                "cloud": cloud, "shutdown": bool(shutdown), "master_shot_ids": [],
+                "orchestration": copy.deepcopy(orchestration or {}), "target_seconds": count * 5}
             self.store.save()
             with self.live_lock:
                 self.lines.clear()
@@ -2242,6 +2478,295 @@ class Studio:
         with self.store.lock:
             shot.update(changes)
             self.store.save()
+
+    def create_production_plan(self) -> None:
+        state = self.store.data
+        source = story_input(state["plot"])
+        bible = state.get("story_bible") or build_story_bible(state["plot"], state["master_seed"], self.notice)
+        state["story_bible"] = bible
+        source.setdefault("characters", bible["characters"])
+        source.setdefault("objects", bible["objects"])
+        options = state["orchestration"]
+        capabilities = registry(state["comfy"])
+        brain = CinematicBrain(capabilities, options.get("policy", "auto"),self.notice)
+        if brain.cap.backend == "minimax":
+            try:
+                state["provider_access"] = MiniMaxH3(brain.cap).verify_access()
+            except ProviderError as exc:
+                if options.get("policy","auto") in {"h3","h3-max"}:
+                    raise
+                self.notice("H3 preflight unavailable ("+exc.category+"); using the existing local workflow before any paid task.")
+                brain = CinematicBrain(capabilities,"local",self.notice)
+                brain.routing_reason = "H3 read-only preflight failed: " + exc.category + "; compatible local fallback selected."
+                state["provider_access"] = {"availability":"unavailable","category":exc.category}
+        if (options.get("context_ir") or options.get("regenerate_2k")) and brain.cap.id != "MiniMax-H3":
+            raise ValueError("ContextIR and 2K provider regeneration require MiniMax-H3; disable them for this backend")
+        plan = options.get("reviewed_plan")
+        if plan:
+            CinematicBrain.validate(plan)
+            if plan["original_story"] != source["plot"] or plan["duration_seconds"] != state["target_seconds"]:
+                raise ValueError("Reviewed plan is stale; re-plan the edited story/duration")
+            if any(s["model_route"]["model"] != brain.cap.id for s in plan["shots"]):
+                raise ValueError("Reviewed backend is no longer available; review the fallback plan")
+            if any(s["duration_seconds"] not in brain.cap.durations
+                   or s["model_route"].get("backend") != brain.cap.backend for s in plan["shots"]):
+                raise ValueError("Reviewed plan contains unsupported duration/backend settings")
+        else:
+            plan = brain.plan(source, state["target_seconds"], state["job_id"])
+        plan["film_id"] = state["job_id"]
+        fields = {"shot_id","shot_uid","scene_id","sequence_id","logical_take_id","visual_prompt","duration_seconds",
+                  "camera_movement","lighting_cue","framing","characters_present","narrative_purpose","starting_state",
+                  "ending_state","dialogue","approval","model_route","keyframe_strategy","dependency_ids",
+                  "continuity_policy","validation_required","visual_assessment"}
+        shots = [{k:copy.deepcopy(v) for k,v in s.items() if k in fields} for s in plan["shots"]]
+        for shot in shots:
+            shot.update(status="pending", attempts=0, seed=state["master_seed"])
+        state.update(shots=shots, shot_count=len(shots), production_plan=plan,
+                     model_registry=[cap.snapshot() for cap in capabilities])
+        atomic_json(Path(state["folder"]) / "production_plan.json", plan)
+        self.store.save()
+        self.notice(f"Cinematic plan saved: {len(plan['scenes'])} scenes, {len(shots)} generation tasks, "
+                    f"{state['target_seconds']} seconds; {brain.cap.id}. {brain.routing_reason}")
+
+    def approve_frame(self, shot_id: int, start: str | None, end: str | None) -> str:
+        with self.guard:
+            if self.running():
+                raise ValueError("Pause the production before changing keyframes")
+            shot = next((s for s in self.store.data.get("shots",[]) if s["shot_id"] == int(shot_id)),None)
+            if not shot or not self.store.data.get("orchestration",{}).get("enabled"):
+                raise ValueError("Keyframe editing requires a shot in a new orchestrated project")
+            if not start and not end:
+                raise ValueError("Upload a start and/or end frame")
+            if end and shot["model_route"]["backend"] != "minimax":
+                raise ValueError("This exported ComfyUI profile does not declare native end-frame support")
+            folder = Path(self.store.data["folder"]) / "keyframes"
+            folder.mkdir(exist_ok=True)
+            ledger = self.store.data.setdefault("asset_ledger",{})
+            assets = []
+            for role,source in (("first_frame",start),("last_frame",end)):
+                if not source:
+                    continue
+                asset_id = uuid.uuid4().hex
+                target = folder / (asset_id + ".png")
+                save_anchor_png(Path(source),target)
+                ledger[asset_id] = {"id":asset_id,"path":str(target),"kind":"image","role":role,
+                    "sha256":digest(target),"approved":True,"critical":True,"priority":100,
+                    "provenance":"user-approved upload","approved_at":utc()}
+                assets.append(asset_id)
+            shot["keyframe_asset_ids"] = assets
+            self.store.save()
+            return "Approved keyframe versions saved separately; existing movie/reference files were preserved."
+
+    def review_shot(self, shot_id: int) -> str:
+        with self.store.lock:
+            shot = next((s for s in self.store.data.get("shots",[]) if s["shot_id"] == int(shot_id)),None)
+            if not shot or shot["status"] != "completed":
+                raise ValueError("Select a completed shot")
+            shot.update(approval="approved",approved_at=utc())
+            self.store.save()
+        return "Shot approved by user review; no automated identity score is implied."
+
+    def recover_provider_task(self, shot_id: int, phase: str, task_id: str) -> str:
+        """Explicit reconciliation of an ambiguous paid POST; never resubmit it."""
+        with self.guard:
+            if self.running():
+                raise ValueError("Wait for the production to stop before task reconciliation")
+            if phase not in {"generation","context_ir","regeneration"} or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}",task_id):
+                raise ValueError("Select a valid phase and provider task ID")
+            shot = next((s for s in self.store.data.get("shots",[]) if s["shot_id"]==int(shot_id)),None)
+            if not shot or shot.get("model_route",{}).get("backend") != "minimax":
+                raise ValueError("Select an H3 shot")
+            cap = next(c for c in registry(self.store.data["comfy"]) if c.id==shot["model_route"]["model"])
+            task = MiniMaxH3(cap).request("GET","/v2/query/video_generation/"+task_id).get("task",{})
+            if task.get("id") != task_id or task.get("model",cap.id) != cap.id:
+                raise ValueError("Provider task does not match the selected model/account")
+            if task.get("status") not in {"queued","running","succeeded"}:
+                raise ValueError("Recovered task is not usable")
+            # The operator explicitly associates this task with its saved request.
+            if phase == "generation":
+                shot.update(provider_task_id=task_id,provider_submission="accepted")
+            else:
+                shot.setdefault("provider_stages",{}).setdefault(phase,{}).update(task_id=task_id,submission="accepted")
+            shot.update(status="submitted",reconciled_at=utc())
+            self.store.save()
+            return "Existing provider task attached. Resume checkpoint to poll it; no new paid request was submitted."
+
+    def revise_shot(self, shot_id: int, prompt: str, allow_approved: bool) -> str:
+        with self.guard:
+            if self.running() or self.store.data.get("status") in {"shutdown_pending","shutdown_scheduled"}:
+                raise ValueError("Pause the production and wait for the current shot before regeneration")
+            state = self.store.data
+            shot = next((s for s in state.get("shots",[]) if s["shot_id"] == int(shot_id)),None)
+            if not shot:
+                raise ValueError("Shot not found")
+            if shot.get("approval") == "approved" and not allow_approved:
+                raise ValueError("Explicitly allow a new version of this approved shot")
+            if len(prompt) > 12000:
+                raise ValueError("Replacement shot prompt is too long")
+            version = uuid.uuid4().hex
+            folder = Path(state["folder"])
+            archive = folder / "versions" / version
+            archive.mkdir(parents=True)
+            atomic_json(archive / "shot.json", shot)
+            for pattern in (f"*_{int(shot_id):04d}.*", "final_movie.mp4"):
+                for source in folder.glob(pattern):
+                    if source.is_file() and not source.is_symlink():
+                        target = archive / source.name
+                        try: os.link(source,target)
+                        except OSError: shutil.copyfile(source,target)
+                        if digest(source) != digest(target):
+                            raise RuntimeError("Version archive verification failed; original retained")
+            if (folder / "final_movie.mp4").is_file():
+                (folder / "final_movie.mp4").unlink()  # Verified version remains in archive.
+            original = copy.deepcopy(shot)
+            keep = {k:v for k,v in shot.items() if k in {"shot_id","shot_uid","scene_id","sequence_id","logical_take_id",
+                    "visual_prompt","duration_seconds","camera_movement","lighting_cue","framing","characters_present",
+                    "narrative_purpose","starting_state","ending_state","dialogue","model_route","keyframe_strategy",
+                    "dependency_ids","continuity_policy","seed","keyframe_asset_ids","identity_tokens","style_tokens","object_tokens"}}
+            shot.clear();shot.update(keep)
+            shot.update(status="pending",attempts=0,approval="pending",revision=version)
+            if prompt.strip(): shot["visual_prompt"] = prompt.strip()
+            affected = []
+            for neighbor in state["shots"]:
+                if original.get("shot_uid") in neighbor.get("dependency_ids",[]):
+                    neighbor["dependency_review_required"] = True
+                    affected.append(neighbor["shot_id"])
+            state.update(movie_ready=False,final_file=str(self.root / "final_movie.mp4"),status="rendering",
+                         pause_requested=False,shutdown=False,delivery_id=state["job_id"] + "_" + version[:8])
+            for key in ("final_sha256","upload_receipt","completed_at"):
+                state.pop(key,None)
+            state.setdefault("cloud",{}).pop("file_id",None)
+            if state.get("cloud",{}).get("provider") in {"Google Drive","Dropbox"}:
+                state["cloud"]["status"] = "pending"
+            self.store.save()
+            self.launch()
+            return f"Regenerating only shot {shot_id}; prior version archived. Dependent shots flagged for review: {affected}. GPU auto-stop disabled for review."
+
+    def prepare_shot_request(self, shot: dict[str, Any]) -> None:
+        """Freeze the actual selected references and compiled shot-specific context."""
+        state = self.store.data
+        if not state.get("orchestration", {}).get("enabled"):
+            return
+        model = shot["model_route"]["model"]
+        cap = next(c for c in registry(state["comfy"]) if c.id == model)
+        if cap.backend == "minimax" and cap.availability not in {"configured_unverified", "verified_access"}:
+            raise ProviderError("h3_configuration_unavailable")
+        present = shot.get("characters_present", [])
+        assets = []
+        cast = state.get("story_bible", {}).get("characters", [])
+        identities = []
+        for index, character in enumerate(cast):
+            if character["id"] not in present:
+                continue
+            identities.append(f"{character['name']}: {character['appearance']}; {character['wardrobe']}")
+            anchor = state["anchor"] if index == 0 else character.get("anchor", {})
+            path = Path(anchor.get("image_path", ""))
+            if not path.is_file():
+                raise ValueError("A required cast anchor is not ready")
+            assets.append({"id":character["id"] + "-anchor", "character_id":character["id"], "kind":"image",
+                           "role":"reference_image", "path":str(path), "approved":True, "critical":True,
+                           "priority":100, "sha256":digest(path)})
+        if not assets:
+            path = Path(state["anchor"]["image_path"])
+            assets.append({"id":"master", "kind":"image", "role":"reference_image", "path":str(path),
+                           "approved":True,"critical":True,"priority":100,"sha256":digest(path)})
+        approved_frames = [state.get("asset_ledger",{}).get(i) for i in shot.get("keyframe_asset_ids",[])]
+        if any(frame is None for frame in approved_frames):
+            raise ValueError("A selected keyframe version is missing")
+        mode = "reference"
+        if approved_frames and cap.backend == "minimax":
+            assets,mode = approved_frames,"endpoints"
+        if approved_frames and cap.backend == "comfyui":
+            first = next((a for a in approved_frames if a["role"] == "first_frame"),None)
+            if first:
+                shot["approved_start_frame"] = first["path"]
+                assets[0] = {**first,"role":"reference_image"}
+        manifest = ReferenceBudget(cap).select(assets, mode, present or None)
+        compiled = compile_motion(shot, "; ".join(identities),
+                                  state.get("story_bible", {}).get("creative_constraints", ""))
+        compiled += ". Locked continuity constraints: " + "; ".join(
+            shot.get(key,"") for key in ("identity_tokens","style_tokens","object_tokens") if shot.get(key))
+        lighting = shot.get("world_state",{}).get("lighting",{})
+        if lighting:
+            compiled += (f". Preserve scene lighting: {lighting['temperature_k']} K, "
+                         f"world-space key direction {lighting['key_direction_world']}; consistent shadows and reflections.")
+        self.checkpoint_shot(shot, reference_manifest=manifest, compiled_prompt=compiled,
+                             context={"initial":shot.get("starting_state"),"terminal":shot.get("ending_state"),
+                                      "characters":present,"dependencies":shot.get("dependency_ids",[])})
+        atomic_json(Path(state["folder"]) / f"shot_{shot['shot_id']:04d}.request.json",
+                    {"prompt":compiled,"references":manifest,"model_route":shot["model_route"],
+                    "duration_seconds":shot_seconds(shot),"prepared_at":utc()})
+
+    def render_h3_shot(self, shot: dict[str, Any]) -> Path:
+        state = self.store.data
+        folder = Path(state["folder"])
+        raw = folder / f"raw_{shot['shot_id']:04d}.mp4"
+        if raw.is_file() and shot.get("raw_sha256") == digest(raw):
+            self.checkpoint_shot(shot, status="rendered")
+            return raw
+        cap = next(c for c in registry(state["comfy"]) if c.id == shot["model_route"]["model"])
+        provider = MiniMaxH3(cap)
+        task_id = shot.get("provider_task_id")
+        if not task_id:
+            if shot.get("provider_submission") in {"submitting","unknown"}:
+                raise ProviderError("provider_task_recovery_required", ambiguous=True)
+            provider.verify_access()  # Read-only auth/schema check, no paid task.
+            resolution = "2K" if state["media"]["width"] >= 1920 and "2K" in cap.resolutions else "768P"
+            payload = provider.payload(shot, shot["reference_manifest"], [folder], resolution)
+            if state.get("orchestration",{}).get("context_ir"):
+                if cap.id != "MiniMax-H3":
+                    raise ValueError("ContextIR is declared only for MiniMax-H3")
+                context = self.h3_stage(shot,provider,"context_ir","/v2/h3_context_ir",
+                    {k:v for k,v in payload.items() if k != "resolution"})
+                prompt = context.get("content",{}).get("prompt")
+                if not isinstance(prompt,str) or not prompt.strip():
+                    raise ProviderError("context_ir_missing_prompt")
+                payload["content"][0] = {"type":"text","text":prompt}
+            fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+            self.checkpoint_shot(shot, provider_submission="submitting", status="submitted",
+                                 request_fingerprint=fingerprint, submitted_at=utc())
+            try:
+                task_id = provider.create(payload)
+            except ProviderError as exc:
+                self.checkpoint_shot(shot, provider_submission="unknown" if exc.ambiguous else "rejected",
+                                     provider_error=exc.category)
+                raise
+            self.checkpoint_shot(shot, provider_task_id=task_id, provider_submission="accepted")
+        task = provider.wait(task_id, self.notice)
+        if state.get("orchestration",{}).get("regenerate_2k"):
+            if cap.id != "MiniMax-H3":
+                raise ValueError("2K provider regeneration is declared only for MiniMax-H3")
+            task = self.h3_stage(shot,provider,"regeneration","/v2/video_regeneration",
+                {"model":"MiniMax-H3","source_task_id":task_id,"resolution":"2K"})
+        provider.download(task, raw)
+        if abs(probe(raw) - shot_seconds(shot)) > 0.25:
+            raise ValueError("Provider output duration does not match the requested shot")
+        self.checkpoint_shot(shot, status="rendered", raw_sha256=digest(raw), native_audio=True,
+                             provider_result={k:task.get(k) for k in ["id","model","status","duration","resolution","ratio","usage"]},
+                             source_resolution=task.get("resolution"), real_provider_generation_verified=True)
+        return raw
+
+    def h3_stage(self, shot: dict[str, Any], provider: MiniMaxH3, name: str,
+                 endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        stage = shot.setdefault("provider_stages",{}).setdefault(name,{})
+        if not stage.get("task_id"):
+            if stage.get("submission") in {"submitting","unknown"}:
+                raise ProviderError("provider_"+name+"_recovery_required",ambiguous=True)
+            stage.update(submission="submitting",submitted_at=utc(),
+                request_fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest())
+            self.store.save()
+            try:
+                task_id = provider.create(payload,endpoint)
+            except ProviderError as exc:
+                stage.update(submission="unknown" if exc.ambiguous else "rejected",error=exc.category)
+                self.store.save()
+                raise
+            stage.update(task_id=task_id,submission="accepted")
+            self.store.save()
+        result = provider.wait(stage["task_id"],self.notice)
+        stage.update(status="succeeded",completed_at=utc())
+        self.store.save()
+        return result
 
     def ensure_master_anchor(self, client: ComfyClient, character: dict[str, Any] | None = None) -> Path:
         """Create once, checkpoint before shots, reuse the exact same pixels.
@@ -2397,7 +2922,8 @@ class Studio:
             continuing = shot.get("status") in {"submitting", "submitted"}
             if not continuing:
                 attempt = shot.get("attempts", 0) + 1
-                marker = shot.get("reconcile_marker") or f"{state['job_id']}:{shot['shot_id']}:{attempt}"
+                generation = state['job_id'] + (":" + shot["revision"] if shot.get("revision") else "")
+                marker = shot.get("reconcile_marker") or f"{generation}:{shot['shot_id']}:{attempt}"
                 self.checkpoint_shot(shot, attempts=attempt, marker=marker,
                                      prompt_id=shot.get("retry_prompt_id"), status="submitting")
             prompt_id = shot.get("prompt_id")
@@ -2493,6 +3019,9 @@ class Studio:
 
     def prepare_continuity(self, client: ComfyClient, shot: dict[str, Any]) -> None:
         state = self.store.data
+        if shot.get("continuity_policy") == "new_composition" or shot.get("model_route", {}).get("backend") == "minimax":
+            self.checkpoint_shot(shot, continuity_input=None, continuity_from=None, consistency_prepared=True)
+            return
         settings = state.get("comfy", {}).get("consistency", {}).get("continuity", {})
         mode = settings.get("mode", "off")
         if mode == "off":
@@ -2537,6 +3066,7 @@ class Studio:
         clips = [shot for shot in snapshot["shots"] if shot["status"] == "completed"]
         if not clips:
             return
+        duration = movie_seconds(clips)
         folder = Path(snapshot["folder"])
         playlist = folder / "filelist.txt"
         # Atomic replacement acts like append during normal execution, and also
@@ -2552,7 +3082,7 @@ class Studio:
             audio_list = folder / "audio_filelist.txt"
             for shot in clips:
                 path = folder / f"shot_{shot['shot_id']:04d}.wav"
-                validate_pcm(path)
+                validate_pcm(path, shot_seconds(shot))
                 if digest(path) != shot.get("audio_sha256"):
                     raise RuntimeError(f"Shot {shot['shot_id']} soundtrack failed integrity verification")
             atomic_bytes(audio_list, "".join(f"file 'shot_{shot['shot_id']:04d}.wav'\n" for shot in clips).encode())
@@ -2560,15 +3090,15 @@ class Studio:
             # master, preventing per-segment AAC priming delays from adding up.
             args += ["-f", "concat", "-safe", "1", "-i", str(audio_list), "-map", "0:v:0", "-map", "1:a:0",
                      "-c:v", "copy", "-c:a", "aac", "-b:a", settings["audio_bitrate"], "-ar", "48000", "-ac", "2",
-                     "-af", f"atrim=end_sample={len(clips) * 240000},asetpts=N/SR/TB", "-t", str(len(clips) * 5)]
+                     "-af", f"atrim=end_sample={duration * 48000},asetpts=N/SR/TB", "-t", str(duration)]
         else:
             args += ["-map", "0:v:0", "-c:v", "copy", "-an"]
         args += ["-movflags", "+faststart", str(pending)]
         run(args, timeout=1800)
-        if abs(probe(pending) - 5 * len(clips)) > max(0.25, len(clips) * 0.002):
+        if abs(probe(pending) - duration) > max(0.25, len(clips) * 0.002):
             raise RuntimeError("Master duration verification failed")
         if settings:
-            validate_finished_media(pending, 5 * len(clips), snapshot["media"])
+            validate_finished_media(pending, duration, snapshot["media"])
         with pending.open("r+b") as handle:
             os.fsync(handle.fileno())
         os.replace(pending, master)
@@ -2576,13 +3106,13 @@ class Studio:
         with self.store.lock:
             self.store.data["master_shot_ids"] = [s["shot_id"] for s in clips]
             self.store.save()
-        self.notice(f"Master updated: {len(clips)} completed shots, {len(clips) * 5} seconds"
+        self.notice(f"Master updated: {len(clips)} completed shots, {duration} seconds"
                     + (", synchronized stereo AAC soundtrack." if settings.get("audio") else "."))
 
     def consume(self, work: queue.Queue) -> None:
         """Single consumer preserves shot order; failures never kill it silently."""
         try:
-            self.assemble()  # Rebuild durable completed clips on restart.
+            retry(self.assemble, "Recovered master assembly", self.notice)
             while True:
                 item = work.get()
                 try:
@@ -2736,6 +3266,64 @@ class Studio:
             self.notice(f"Cloud backup ERROR ({type(exc).__name__}): all attempts finished. "
                         "Local movie retained; GPU shutdown withheld until delivery succeeds.")
 
+    def deliver_final_movie(self, final: Path) -> None:
+        """Checkpointed delivery; old jobs retain their original cloud policy.
+
+        Local means the app host, never a browser client's filesystem. Publish
+        downloads separately through the existing restricted media directory.
+        """
+        state = self.store.data
+        storage = state.get("storage")
+        if not storage:  # Backward compatibility with interrupted productions.
+            self.backup_final_movie(final)
+            return
+        provider = storage["provider"]
+        if provider in {"Google Drive", "Dropbox"}:
+            self.backup_final_movie(final)
+            storage["status"] = state["cloud"]["status"]
+            self.store.save()
+            return
+        if provider == "None":
+            storage.update(status="temporary", completed_at=utc())
+            self.store.save()
+            self.notice("Storage destination None: master retained in the working environment; download available.")
+            return
+        if provider != "Local PC Storage":
+            raise ValueError("Unsupported checkpoint storage destination")
+        try:
+            storage["status"] = "saving"
+            self.store.save()
+            folder = Path(storage["directory"])
+            folder.mkdir(parents=True, exist_ok=True)
+            # Unique names preserve previous movies. A same-filesystem hard link
+            # avoids another full-size movie on a small GPU instance disk.
+            target = folder / f"{state['job_id']}_final_movie.mp4"
+            expected = state["final_sha256"]
+            if not target.exists() or digest(target) != expected:
+                pending = target.with_suffix(".pending.mp4")
+                pending.unlink(missing_ok=True)
+                try:
+                    try:
+                        os.link(final, pending)
+                    except OSError:
+                        shutil.copyfile(final, pending)
+                    with pending.open("r+b") as handle:
+                        os.fsync(handle.fileno())
+                    if digest(pending) != expected:
+                        raise RuntimeError("Local delivery checksum mismatch")
+                    os.replace(pending, target)
+                    fsync_directory(folder)
+                finally:
+                    pending.unlink(missing_ok=True)
+            storage.update(status="verified", path=str(target), sha256=expected, verified_at=utc())
+            self.store.save()
+            self.notice(f"Local storage SUCCESS: {target}; SHA-256 verified. Browser download is also available.")
+        except Exception as exc:
+            storage.update(status="error", error=type(exc).__name__, error_at=utc())
+            self.store.save()
+            self.notice(f"Local storage ERROR ({type(exc).__name__}); master retained. Shutdown withheld; resume retries delivery.")
+            raise
+
     def complete_movie(self, final: Path) -> None:
         state = self.store.data
         # Keep every film under its own job, even as root/final_movie.mp4 is
@@ -2754,7 +3342,7 @@ class Studio:
             final = archive
             state["final_file"] = str(archive)
             self.store.save()
-        self.backup_final_movie(final)
+        self.deliver_final_movie(final)
         with self.store.lock:
             state.update(status="movie_complete", completed_at=utc())
             self.store.save()
@@ -2763,6 +3351,7 @@ class Studio:
             "failed_shot_ids": state["failed_shot_ids"], "partial": state["partial"],
             "final_sha256": state["final_sha256"], "cloud_status": state["cloud"]["status"],
             "upload_receipt": state.get("upload_receipt"), "completed_at": state["completed_at"],
+            "storage": state.get("storage"),
             "postproduction": state.get("media", {}).get("postproduction", {"version": 0, "audio": False, "cinematic": False})})
         self.notice(f"Movie processing complete at {state['completed_at']}; "
                     f"cloud backup: {state['cloud']['status']}.")
@@ -2800,7 +3389,11 @@ class Studio:
                     self.store.save()
             if not state["shots"]:
                 stage = "storyboard planning"
-                shots = plan_shots(state["plot"], state["shot_count"], self.notice)
+                if state.get("orchestration", {}).get("enabled"):
+                    self.create_production_plan()
+                    shots = state["shots"]
+                else:
+                    shots = plan_shots(state["plot"], state["shot_count"], self.notice)
                 for shot in shots:
                     shot.update(status="pending", attempts=0,
                                 seed=state.get("master_seed", uuid.uuid4().int % (2**63)))
@@ -2859,6 +3452,8 @@ class Studio:
                     if state.get("story_engine_version"):
                         self.ensure_cast_references(client, master)
                     for shot in remaining:
+                        if self.store.data.get("pause_requested"):
+                            break
                         if self.assembly_error:
                             raise RuntimeError("Assembly failed; stopping producer")
                         try:
@@ -2868,7 +3463,13 @@ class Studio:
                             self.notice(f"Shot {shot['shot_id']}: continuity preparation failed "
                                         f"({type(exc).__name__}); skipping this shot and resetting the next chain.")
                             continue
-                        raw = self.render_shot(client, shot, reference)
+                        self.prepare_shot_request(shot)
+                        reference_for_shot = reference
+                        if shot.get("approved_start_frame"):
+                            reference_for_shot = client.upload(Path(shot["approved_start_frame"]),
+                                                               f"{state['job_id']}_start_{shot['shot_id']}")
+                        raw = (self.render_h3_shot(shot) if shot.get("model_route", {}).get("backend") == "minimax"
+                               else self.render_shot(client, shot, reference_for_shot))
                         if raw:
                             work.put((shot, raw))
             finally:
@@ -2878,6 +3479,11 @@ class Studio:
                 consumer = None
             if self.assembly_error:
                 raise RuntimeError("Assembly failed; restart will recover durable clips")
+            if self.store.data.get("pause_requested"):
+                self.store.data.update(status="paused")
+                self.store.save()
+                self.notice("Paused at a shot boundary; rendered clips and the production plan are retained.")
+                return
             completed = [s for s in state["shots"] if s["status"] == "completed"]
             failed = [s for s in state["shots"] if s["status"] == "failed"]
             if not completed:
@@ -2890,10 +3496,24 @@ class Studio:
                 os.link(self.root / "current_movie_stream.mp4", pending)
             except OSError:
                 shutil.copyfile(self.root / "current_movie_stream.mp4", pending)
-            if abs(probe(pending) - len(completed) * 5) > 0.5:
+            if abs(probe(pending) - movie_seconds(completed)) > 0.5:
                 raise RuntimeError("Final movie duration is invalid")
+            final_metadata = {}
             if state["media"].get("postproduction"):
-                validate_finished_media(pending, len(completed) * 5, state["media"])
+                final_metadata = validate_finished_media(pending, movie_seconds(completed), state["media"])
+            if state.get("orchestration",{}).get("enabled"):
+                self.notice("Final quality gate: decoding every video/audio packet; identity and dialogue still require review.")
+                run(["ffmpeg","-hide_banner","-v","error","-xerror","-i",str(pending),
+                     "-map","0:v:0","-map","0:a?","-f","null","-"],timeout=3600)
+                finished_video = next((s for s in final_metadata.get("streams",[]) if s.get("codec_type")=="video"),{})
+                report = {"checked_at":utc(),"decoded_without_errors":True,"duration_seconds":movie_seconds(completed),
+                    "delivery_canvas":[state["media"]["width"],state["media"]["height"]],
+                    "export_dimensions":[finished_video.get("width"),finished_video.get("height")],
+                    "resolution_provenance":"normalized/resized export; native detail is limited by each source",
+                    "visual_identity":"not_measured","lip_sync":"not_measured","dialogue_correctness":"not_measured",
+                    "audio_sources":[s.get("audio_plan",{}).get("source","procedural_or_disabled") for s in completed]}
+                atomic_json(Path(state["folder"])/"quality_report.json",report)
+                state["quality_report"] = report
             with pending.open("r+b") as handle:
                 os.fsync(handle.fileno())
             os.replace(pending, final)
@@ -2904,13 +3524,16 @@ class Studio:
                 self.store.save()
             final_ready = True
             self.notice(f"Rendering finished: {len(completed)} successful, {len(failed)} failed. "
-                        f"{'PARTIAL ' if failed else ''}Movie saved locally ({len(completed) * 5}s).")
-            stage = "optional cloud backup/finalization"
+                        f"{'PARTIAL ' if failed else ''}Movie saved locally ({movie_seconds(completed)}s).")
+            stage = "selected storage delivery/finalization"
             self.complete_movie(final)
         except Exception as exc:
             # Error class is safe to log; provider exceptions can contain secrets.
+            if isinstance(exc, ProviderError):
+                self.notice("H3 stopped: " + exc.category + (". Submission may exist; attach its provider task ID before resuming."
+                    if exc.ambiguous else ". Correct provider configuration before resuming; no unrelated shots were reset."))
             self.notice(f"Pipeline stopped during {stage} ({type(exc).__name__}). "
-                        + ("Final movie retained; automatic teardown will still run."
+                        + ("Final movie retained; teardown remains subject to storage verification."
                            if final_ready else "Checkpoint retained; shutdown withheld until final movie is ready."))
             if isinstance(exc, SetupError):
                 self.notice(str(exc))
@@ -2926,8 +3549,9 @@ class Studio:
                 consumer.join()
             if final_ready:
                 cloud = self.store.data.get("cloud", {})
-                if cloud.get("status") == "error":
-                    self.notice("Automatic shutdown withheld: cloud delivery is not verified. "
+                if (cloud.get("status") == "error"
+                        or self.store.data.get("storage", {}).get("status") == "error"):
+                    self.notice("Automatic shutdown withheld: selected storage delivery is not verified. "
                                 "Attach / Resume Checkpoint retries delivery without rendering again.")
                     with self.store.lock:
                         self.store.data["status"] = "backup_error"
@@ -2945,6 +3569,18 @@ class Studio:
 
     def teardown(self) -> None:
         state = self.store.data
+        if not state.get("shutdown", True):
+            with self.store.lock:
+                state.update(status="partial" if state.get("partial") else "complete", completed_at=utc())
+                self.store.save()
+            self.notice("Production complete. Automatic GPU stop is disabled for this project.")
+            return
+        storage = state.get("storage", {})
+        if storage.get("provider") == "Local PC Storage":
+            target = Path(storage.get("path", ""))
+            if (storage.get("status") != "verified" or not target.is_file()
+                    or digest(target) != state.get("final_sha256")):
+                raise RuntimeError("Refusing shutdown until local storage delivery is verified")
         final = Path(state.get("final_file", str(self.root / "final_movie.mp4")))
         if not state.get("movie_ready") or not final.is_file() or digest(final) != state.get("final_sha256"):
             raise RuntimeError("Refusing shutdown before a verified local final movie exists")
@@ -3025,7 +3661,9 @@ def build_app(studio: Studio) -> Any:
             state = studio.store.snapshot()
             if state.get("job_id") != observed_job:
                 observed_job = state.get("job_id")
-                cursor, delivered_final = 0, None
+                with studio.live_lock:
+                    cursor = max(0, len(studio.streams) - 1)
+                delivered_final = None
             with studio.live_lock:
                 logs = "\n".join(studio.lines)
                 clip = studio.streams[cursor] if cursor < len(studio.streams) else None
@@ -3039,14 +3677,18 @@ def build_app(studio: Studio) -> Any:
             if final and state.get("final_sha256") != delivered_final:
                 final_output = str(studio.publish_media(Path(final)))
                 delivered_final = state.get("final_sha256")
-            yield clip if clip else gr.skip(), logs, final_output, label
+            yield str(browser_preview(Path(clip))) if clip else gr.skip(), logs, final_output, label
             if not studio.running() and not clip:
                 break
             time.sleep(0.5)
 
     def start(plot: str, image: str | None, minutes: float, provider: str,
-              destination: str, secret: str, owner: str, sound: bool, cinematic: bool) -> Iterator[Any]:
+              destination: str, secret: str, owner: str, sound: bool, cinematic: bool,
+              policy: str = "auto", reviewed: str = "", stop_gpu: bool = False,
+              delivery: str = "story", context_ir: bool = False, regenerate_2k: bool = False) -> Iterator[Any]:
         try:
+            if len(reviewed) > 2*1024**2:
+                raise ValueError("Reviewed plan exceeds the 2 MiB limit")
             google_token = oauth.serialized_credentials(owner) if provider == "Google Drive" else ""
             # Resuming an existing job uses its encrypted checkpoint credentials.
             resuming = studio.store.data and studio.store.data.get("status") not in TERMINAL
@@ -3054,13 +3696,105 @@ def build_app(studio: Studio) -> Any:
                 studio.notice("Google Drive is not authorized; optional backup will be skipped for this job.")
             studio.start(plot, image, minutes, provider, destination,
                          secret if provider == "Dropbox" else "", google_credentials=google_token,
-                         sound_design=sound, cinematic=cinematic)
+                         sound_design=sound, cinematic=cinematic, shutdown=stop_gpu,
+                         orchestration={"enabled":True,"policy":policy,"delivery":delivery,
+                                        "context_ir":context_ir,"regenerate_2k":regenerate_2k,
+                                        "reviewed_plan":json.loads(reviewed) if reviewed.strip() else None})
         except Exception as exc:
             # Validation errors contain no OAuth payloads; never surface provider exceptions.
             if isinstance(exc, (ValueError, FileNotFoundError)):
                 raise gr.Error(str(exc)) from None
             raise gr.Error(f"Could not start studio ({type(exc).__name__}); check configuration.") from None
         yield from monitor()
+
+    def refresh_history() -> tuple[Any, str]:
+        choices, detail = studio.history()
+        return gr.update(choices=choices, value=None), detail
+
+    def plan_rows(plan: dict[str, Any]) -> list[list[Any]]:
+        return [[s["shot_id"],s.get("scene_id"),s.get("framing","legacy"),shot_seconds(s),
+                 s.get("model_route",{}).get("model","checkpoint workflow"),
+                 s.get("status","planned"),s.get("approval","not reviewed")]
+                for s in plan.get("shots",[])]
+
+    def plan_story(plot: str, minutes: float, policy: str) -> tuple[str, Any, Any]:
+        source = story_input(plot)
+        config = studio.store.data.get("comfy",{})
+        if not config:
+            try: _,config = workflow_config()
+            except (ValueError,FileNotFoundError): config = {}
+        capabilities = registry(config)
+        bible = build_story_bible(plot,0,studio.notice)
+        source.setdefault("characters",bible["characters"])
+        brain = CinematicBrain(capabilities,policy,studio.notice)
+        plan = brain.plan(source,int(round(minutes*60)))
+        return json.dumps(plan,indent=2,ensure_ascii=False),plan_rows(plan),[c.snapshot() for c in capabilities]
+
+    def inspect_plan() -> tuple[str, Any, Any]:
+        state = studio.store.snapshot()
+        plan = state.get("production_plan", {"legacy_checkpoint":True,
+            "note":"Existing shot IDs/outputs are preserved; this job was not migrated.","shots":state.get("shots",[])})
+        # Keep editable drafts and credential-bearing checkpoints separate.
+        display = {**plan,"shots":[{k:v for k,v in s.items() if k in {
+            "shot_id","shot_uid","scene_id","visual_prompt","framing","duration_seconds","camera_movement","lighting_cue",
+            "model_route","approval","dependency_ids","status","validation","keyframe_asset_ids","visual_assessment"}}
+            for s in state.get("shots",[])]}
+        return json.dumps(display,indent=2,ensure_ascii=False),plan_rows(display),[c.snapshot() for c in registry(state.get("comfy",{}))]
+
+    def readiness_view() -> Any:
+        return provision_dependencies(studio.root,studio.notice,install=False)
+
+    def verify_provider() -> str:
+        try:
+            result = MiniMaxH3(registry(studio.store.data.get("comfy",{}))[0]).verify_access()
+            return "Provider access verified (read-only). Real generation is still unverified. " + result["availability"]
+        except (ProviderError,ValueError) as exc:
+            return "H3 unavailable: " + (exc.category if isinstance(exc,ProviderError) else "configuration_invalid")
+
+    def pause_production() -> str:
+        with studio.store.lock:
+            if not studio.running():
+                return "No production is running."
+            studio.store.data["pause_requested"] = True
+            studio.store.save()
+        studio.notice("Pause requested; finish the in-flight shot and media queue before pausing. No global GPU interrupt sent.")
+        return "Pause requested at the next shot boundary. Wait for paused status before editing/regenerating."
+
+    def approve_output(number: float) -> str:
+        try: return studio.review_shot(int(number))
+        except ValueError as exc: raise gr.Error(str(exc)) from None
+
+    def save_frames(number: float, first: str | None, last: str | None) -> str:
+        try: return studio.approve_frame(int(number),first,last)
+        except (ValueError,OSError) as exc: raise gr.Error(str(exc) if isinstance(exc,ValueError) else "Keyframe import failed") from None
+
+    def regenerate_output(number: float, prompt: str, approved: bool) -> str:
+        try: return studio.revise_shot(int(number),prompt,approved)
+        except ValueError as exc: raise gr.Error(str(exc)) from None
+
+    def recover_task(number: float, phase: str, task_id: str) -> str:
+        try: return studio.recover_provider_task(int(number),phase,task_id.strip())
+        except (ValueError,ProviderError) as exc:
+            raise gr.Error(str(exc) if isinstance(exc,ValueError) else exc.category) from None
+
+    def preview_history(job_id: str | None) -> tuple[Any, Any, str]:
+        if not job_id:
+            return None, None, "Select a production from the list."
+        try:
+            media, detail = studio.history_media(job_id)
+            return (str(browser_preview(Path(media))) if media else None), media, detail + (
+                " Browser playback uses a smaller proxy; download retains the original quality." if media else "")
+        except (OSError, ValueError) as exc:
+            raise gr.Error(str(exc) if isinstance(exc, ValueError) else "Could not open historical media.") from None
+
+    def remove_history(job_id: str | None, confirmed: bool) -> tuple[Any, Any, Any, str, bool]:
+        try:
+            message = studio.delete_history(job_id or "", confirmed)
+            choices, disk = studio.history()
+            return gr.update(choices=choices, value=None), None, None, message + "\n" + disk, False
+        except Exception as exc:
+            raise gr.Error(str(exc) if isinstance(exc, ValueError) else
+                           "History deletion did not finish. Refresh to inspect remaining files.") from None
 
     with gr.Blocks(title="Autonomous AI Movie Studio") as app:
         owner = gr.State(value=lambda: secrets.token_urlsafe(32), time_to_live=86400,
@@ -3077,6 +3811,23 @@ def build_app(studio: Studio) -> Any:
                             "image loader to its IP-Adapter, FaceID, or other identity-conditioning nodes. "
                             "This reduces drift; generated character consistency is not guaranteed.")
                 minutes = gr.Slider(1, 60, value=1, step=1, label="Target duration (minutes)")
+                with gr.Accordion("Cinematic Orchestration Brain — plan before rendering",open=False):
+                    policy = gr.Dropdown(choices=[("Prefer configured H3; compatible local fallback","auto"),
+                        ("Existing ComfyUI workflow only","local"),("H3 required — no automatic fallback","h3"),
+                        ("H3-Max required — 5–15 seconds, up to 768P","h3-max")],
+                        value="auto",label="Generation routing policy")
+                    delivery = gr.Dropdown(choices=[("Keep storyboard/default delivery","story"),("HD export — 1280 wide","hd"),
+                        ("2K export — 2048 wide","2k"),("4K export — 3840 wide (resize when native unavailable)","4k")],
+                        value="story",label="Delivery resolution")
+                    plan_button = gr.Button("Plan story without rendering")
+                    context_ir = gr.Checkbox(value=False,label="H3 ContextIR prompt expansion (additional provider task; requires access)")
+                    regenerate_2k = gr.Checkbox(value=False,label="H3 2K provider regeneration (additional paid task; whitelist required)")
+                    reviewed = gr.Textbox(label="Editable reviewed plan JSON (blank means automatic planning)",lines=6)
+                    gr.Markdown("Planning uses explicit structural rules and the configured story-bible LLM, where available. "
+                                "It does not claim an automated visual identity score. H3 requires MINIMAX_ENABLED=1 and "
+                                "MINIMAX_API_KEY on the server. Native audio is retained when readable; ambience fallback cannot replace dialogue. "
+                                "Changing resolution does not create native detail. Legacy checkpoints retain their saved workflow.")
+                stop_gpu = gr.Checkbox(value=False,label="Stop the Vast.ai GPU after all work and verified delivery (new jobs only)")
                 with gr.Accordion("Sound design & cinematic finishing", open=False):
                     sound = gr.Checkbox(value=True, label="Automatic ambient sound design (stereo AAC)")
                     cinematic = gr.Checkbox(value=True, label="Cinematic grade, film grain & 2.39:1 center crop")
@@ -3084,9 +3835,11 @@ def build_app(studio: Studio) -> Any:
                                 "It does not generate dialogue or detect exact on-screen events. "
                                 "The widescreen center crop can trim the top and bottom of the source. "
                                 "Finishing choices are saved with the movie; resumed jobs keep their original settings.")
-                with gr.Accordion("📦 Cloud Storage Backup (Optional, Recommended)", open=False):
-                    provider = gr.Dropdown(["None", "Google Drive", "Dropbox"], value="None", label="Cloud Provider")
+                with gr.Accordion("📦 Storage Destination & Optional Cloud Backup", open=False):
+                    provider = gr.Dropdown(["Local PC Storage", "Google Drive", "Dropbox", "None"],
+                                           value="Local PC Storage", label="Storage Destination")
                     destination = gr.Textbox(label="Cloud Destination Folder ID / Path",
+                                             visible=False,
                                              placeholder="Google: blank = My Drive root; Dropbox: /Movies or /")
                     with gr.Group(visible=False) as google_controls:
                         google_signin = gr.Button("🔑 Sign in with Google Drive")
@@ -3101,7 +3854,9 @@ def build_app(studio: Studio) -> Any:
                                     "Google OAuth client setup is required once on the server.")
                     secret = gr.Textbox(label="Dropbox Access Token / OAuth JSON", type="password", visible=False,
                                         placeholder="Dropbox only; leave blank to use STUDIO_CREDENTIALS_FILE")
-                    gr.Markdown("Provider None disables cloud backup. The final movie is saved locally first. "
+                    gr.Markdown("Local PC Storage saves to ./movie_output/ on the machine running this app. "
+                                "On Vast.ai this is the GPU server; use Final movie to download to your PC. "
+                                "None retains the master only in the working environment. "
                                 "With backup enabled, checksum-verified upload is required before the ten-second GPU stop. "
                                 "Failed uploads retain the movie and checkpoint for retry.")
                 button = gr.Button("Start Autonomous Production", variant="primary")
@@ -3111,27 +3866,91 @@ def build_app(studio: Studio) -> Any:
                             "Autoplay with sound may require browser interaction. Source resolution limits recoverable detail.")
             with gr.Column(scale=3):
                 status = gr.Textbox(label="Production status", interactive=False)
-                video = gr.Video(label="Progressive movie preview", streaming=True, autoplay=True, interactive=False)
+                video = gr.Video(label="Live latest-shot preview", streaming=True, autoplay=True, interactive=False)
                 console = gr.Textbox(label="Live production console (UTC)", lines=18, max_lines=20, interactive=False)
                 final = gr.File(label="Final movie", interactive=False)
+        with gr.Accordion("Production history — preview, download & free disk space", open=True):
+            history_choices, history_disk = studio.history()
+            history_choice = gr.Dropdown(choices=history_choices, label="Previous and current productions", value=None)
+            with gr.Row():
+                history_refresh = gr.Button("Refresh production history")
+                history_open = gr.Button("Preview selected production")
+            history_info = gr.Textbox(label="History and storage status", value=history_disk, interactive=False, lines=3)
+            history_video = gr.Video(label="Selected production preview", interactive=False)
+            history_download = gr.File(label="Download selected movie", interactive=False)
+            history_confirm = gr.Checkbox(value=False, label="Delete the selected older production and its local previews/export")
+            history_delete = gr.Button("Delete selected older production", variant="stop")
+            gr.Markdown("The current checkpoint is protected. Deletion removes this app's run files, previews and "
+                        "default local export. ComfyUI originals and cloud copies are kept. Files with other hard links "
+                        "may continue to occupy disk space; the status reports actual reclaimed workspace space.")
+        with gr.Accordion("Production plan, references, review & model readiness",open=False):
+            inspect_button = gr.Button("Inspect current production plan")
+            plan_table = gr.Dataframe(headers=["Shot","Scene","Framing","Seconds","Model","State","Approval"],interactive=False)
+            current_plan = gr.Code(label="Saved plan / shot states",language="json")
+            model_info = gr.JSON(label="Model capabilities and availability — documented ≠ generated")
+            with gr.Row():
+                readiness_button = gr.Button("Check dependency readiness")
+                provider_verify = gr.Button("Verify configured H3 access (no generation)")
+            readiness_info = gr.JSON(label="Environment verification")
+            provider_result = gr.Textbox(label="H3 provider verification",interactive=False)
+            pause_button = gr.Button("Pause after current shot")
+            shot_number = gr.Number(value=1,precision=0,label="Shot ID to review or regenerate")
+            shot_revision = gr.Textbox(label="Replacement visual prompt (blank retains original)",lines=3)
+            approve_button = gr.Button("Approve completed shot")
+            allow_approved = gr.Checkbox(value=False,label="Allow a new version of an approved shot; archive its existing media")
+            regenerate_button = gr.Button("Regenerate selected shot only")
+            recovery_phase = gr.Dropdown(["generation","context_ir","regeneration"],value="generation",label="Ambiguous provider task phase")
+            recovery_id = gr.Textbox(label="Existing provider task ID to reconcile (from your MiniMax account)")
+            recovery_button = gr.Button("Attach existing provider task without submitting again")
+            with gr.Row():
+                first_frame = gr.Image(label="Start keyframe candidate",type="filepath",sources=["upload"])
+                last_frame = gr.Image(label="End keyframe candidate (verified compatible models only)",type="filepath",sources=["upload"])
+            frame_button = gr.Button("Approve uploaded keyframe versions for selected shot")
+            review_result = gr.Textbox(label="Review / pause / regeneration result",interactive=False)
+            gr.Markdown("Pause and wait before editing. Regeneration archives the selected shot and prior master, "
+                        "preserves neighbors, and flags dependent shots for review. It disables automatic stop for that revision. "
+                        "Uploaded keyframes are separate versions used by the next regeneration; current footage stays intact.")
+        plan_button.click(plan_story,[plot,minutes,policy],[reviewed,plan_table,model_info],concurrency_limit=1)
+        inspect_button.click(inspect_plan,outputs=[current_plan,plan_table,model_info],concurrency_limit=1)
+        readiness_button.click(readiness_view,outputs=readiness_info,concurrency_limit=1)
+        provider_verify.click(verify_provider,outputs=provider_result,concurrency_limit=1)
+        pause_button.click(pause_production,outputs=review_result,queue=False)
+        approve_button.click(approve_output,inputs=shot_number,outputs=review_result,concurrency_limit=1)
+        frame_button.click(save_frames,[shot_number,first_frame,last_frame],review_result,concurrency_limit=1)
+        recovery_button.click(recover_task,[shot_number,recovery_phase,recovery_id],review_result,concurrency_limit=1)
+        history_refresh.click(refresh_history, outputs=[history_choice, history_info], queue=False)
+        history_open.click(preview_history, inputs=history_choice,
+                           outputs=[history_video, history_download, history_info], concurrency_limit=1)
+        history_choice.change(lambda: False, outputs=history_confirm, queue=False)
+        history_delete.click(remove_history, inputs=[history_choice, history_confirm],
+                             outputs=[history_choice, history_video, history_download, history_info, history_confirm],
+                             concurrency_limit=1)
+        app.load(refresh_history, outputs=[history_choice, history_info], queue=False)
         outputs = [video, console, final, status]
         provider.change(lambda selected: (gr.update(visible=selected == "Google Drive"),
-                                          gr.update(visible=selected == "Dropbox")),
-                        inputs=provider, outputs=[google_controls, secret], queue=False)
+                                          gr.update(visible=selected == "Dropbox"),
+                                          gr.update(visible=selected in {"Google Drive", "Dropbox"})),
+                        inputs=provider, outputs=[google_controls, secret, destination], queue=False)
         google_signin.click(begin_google, inputs=owner, outputs=[google_link, google_code, google_status],
                             concurrency_limit=4)
         google_finish.click(finish_google, inputs=[owner, google_code], outputs=[google_code, google_status],
                             concurrency_limit=4)
-        button.click(start, [plot, image, minutes, provider, destination, secret, owner, sound, cinematic], outputs,
+        button.click(start, [plot, image, minutes, provider, destination, secret, owner, sound, cinematic,
+                             policy,reviewed,stop_gpu,delivery,context_ir,regenerate_2k], outputs,
                      concurrency_limit=1, concurrency_id="start_job", trigger_mode="once")
 
         def resume_monitor() -> Iterator[Any]:
             with studio.guard:
                 if not studio.running():
+                    if studio.store.data.get("status") == "paused":
+                        studio.store.data.update(pause_requested=False,status="rendering")
+                        studio.store.save()
                     studio.resume()
             yield from monitor()
 
         attach.click(resume_monitor, outputs=outputs, concurrency_limit=4)
+        regenerate_button.click(regenerate_output,[shot_number,shot_revision,allow_approved],review_result,
+                                concurrency_limit=1).then(resume_monitor,outputs=outputs,concurrency_limit=4)
         app.load(monitor, outputs=outputs, concurrency_limit=4)
     return app
 
@@ -3143,6 +3962,125 @@ def self_test() -> None:
     from unittest.mock import Mock, patch
 
     class Tests(unittest.TestCase):
+        def test_backend_restart_recovers_lost_prompt_but_keeps_queued_prompt(self):
+            import itertools
+            client = ComfyClient({"url": "http://127.0.0.1:8188"})
+            for queued in (False, True):
+                client.request = Mock(side_effect=lambda method, route, **kwargs:
+                    {"queue_running": [[0, "saved"]], "queue_pending": []} if route == "/queue" and queued else {})
+                with patch("time.monotonic", side_effect=itertools.count(0, 5)), \
+                     patch("time.sleep"), patch.dict(os.environ, {"SHOT_TIMEOUT": "100"}):
+                    with self.assertRaises(TimeoutError if queued else ValueError):
+                        client.wait("saved", lambda _: None)
+
+        def test_history_previews_and_deletes_only_selected_older_job(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                studio = Studio(root, acquire_lock=False)
+                current, older = "a" * 32, "b" * 32
+                for job_id in (current, older):
+                    folder = root / "runs" / job_id
+                    folder.mkdir(parents=True)
+                    (folder / "final_movie.mp4").write_bytes(b"finished movie")
+                studio.store.data = {"job_id": current}
+                choices, _ = studio.history()
+                self.assertEqual({value for _, value in choices}, {current, older})
+                media, _ = studio.history_media(older)
+                self.assertEqual(Path(media).read_bytes(), b"finished movie")
+                with self.assertRaises(ValueError):
+                    studio.delete_history(older, False)
+                with self.assertRaises(ValueError):
+                    studio.delete_history(current, True)
+                studio.delete_history(older, True)
+                self.assertFalse((root / "runs" / older).exists())
+                self.assertFalse((root / "public_media" / older).exists())
+                self.assertTrue((root / "runs" / current / "final_movie.mp4").is_file())
+
+        def test_history_rejects_paths_and_queue_protected_job(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                studio = Studio(root, acquire_lock=False)
+                for invalid in ("../runs", "/workspace", "", "x" * 32):
+                    with self.assertRaises(ValueError):
+                        studio.history_folder(invalid)
+                job_id = "c" * 32
+                (root / "runs" / job_id).mkdir(parents=True)
+                atomic_json(root / "production_queue.json", [{"job_id": job_id, "status": "running"}])
+                with self.assertRaises(ValueError):
+                    studio.delete_history(job_id, True)
+                self.assertTrue((root / "runs" / job_id).is_dir())
+
+        def test_storage_selection_is_checkpointed_without_cloud_credentials(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                with patch(__name__ + ".workflow_config", return_value=({}, {})), \
+                     patch(__name__ + ".anchor_workflow_config", return_value=({}, {})), \
+                     patch.object(studio, "launch"), \
+                     patch(__name__ + ".credential_spec") as secret:
+                    studio.start("A traveler arrives.", None, 1, "Local PC Storage", "", "unused")
+                secret.assert_not_called()
+                self.assertEqual(studio.store.data["storage"]["provider"], "Local PC Storage")
+                self.assertEqual(studio.store.data["cloud"]["provider"], "None")
+                self.assertEqual(studio.store.snapshot()["storage"]["directory"], str((Path.cwd() / "movie_output").resolve()))
+
+        def test_storage_local_verified_and_idempotent(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                final = root / "final.mp4"
+                final.write_bytes(b"finished movie")
+                studio = Studio(root, acquire_lock=False)
+                studio.store.data = {"job_id": "first", "final_sha256": digest(final),
+                    "storage": {"provider": "Local PC Storage", "directory": str(root / "movie_output")}}
+                studio.deliver_final_movie(final)
+                storage = studio.store.data["storage"]
+                target = Path(storage["path"])
+                self.assertEqual(target.read_bytes(), final.read_bytes())
+                self.assertEqual(storage["status"], "verified")
+                studio.deliver_final_movie(final)
+                studio.store.data["job_id"] = "second"
+                studio.deliver_final_movie(final)
+                self.assertTrue(target.is_file())
+                self.assertNotEqual(studio.store.data["storage"]["path"], str(target))
+
+        def test_storage_local_copy_fallback_and_failure(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                final = root / "final.mp4"
+                final.write_bytes(b"finished movie")
+                studio = Studio(root, acquire_lock=False)
+                studio.store.data = {"job_id": "copy", "final_sha256": digest(final),
+                    "storage": {"provider": "Local PC Storage", "directory": str(root / "output")}}
+                with patch("os.link", side_effect=OSError("cross-device")):
+                    studio.deliver_final_movie(final)
+                self.assertEqual(studio.store.data["storage"]["status"], "verified")
+                studio.store.data["job_id"] = "failure"
+                with patch("os.link", side_effect=OSError()), patch("shutil.copyfile", side_effect=OSError()):
+                    with self.assertRaises(OSError):
+                        studio.deliver_final_movie(final)
+                self.assertEqual(studio.store.data["storage"]["status"], "error")
+                self.assertTrue(final.is_file())
+                self.assertFalse(list((root / "output").glob("*.pending.mp4")))
+                with self.assertRaises(RuntimeError):
+                    studio.teardown()
+
+        def test_storage_none_cloud_and_legacy_routing(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                final = Path(tmp) / "final.mp4"
+                with patch.object(studio, "backup_final_movie") as upload:
+                    studio.store.data = {"storage": {"provider": "None"}}
+                    studio.deliver_final_movie(final)
+                    upload.assert_not_called()
+                    self.assertEqual(studio.store.data["storage"]["status"], "temporary")
+                    for provider in ("Google Drive", "Dropbox"):
+                        studio.store.data = {"storage": {"provider": provider}, "cloud": {"status": "verified"}}
+                        studio.deliver_final_movie(final)
+                        self.assertEqual(studio.store.data["storage"]["status"], "verified")
+                    self.assertEqual(upload.call_count, 2)
+                    studio.store.data = {"cloud": {"provider": "None"}}
+                    studio.deliver_final_movie(final)
+                    self.assertEqual(upload.call_count, 3)
+
         def test_authored_delivery_settings_are_bounded_and_checkpointed(self):
             overrides = {"width": 1280, "height": 720, "crf": 18, "grain": 1, "preset": "slow",
                          "retain_raw_copies": False, "maxrate_mbps": 5, "bufsize_mbit": 4}
@@ -4190,6 +5128,8 @@ def main() -> None:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--media-self-test", action="store_true", help="Run real FFmpeg finishing tests without GPU/cloud/shutdown")
     parser.add_argument("--prepare", action="store_true", help="Prepare automatic workflows/models without rendering or shutdown")
+    parser.add_argument("--readiness", action="store_true", help="Inspect dependencies/capabilities without rendering")
+    parser.add_argument("--provision-dependencies", action="store_true", help="Install only missing manifest dependencies and verify tools")
     parser.add_argument("--enqueue", metavar="PLOT_FILE", help="Queue a text/structured JSON plot after the active production")
     parser.add_argument("--minutes", type=float, default=30, help="Duration for --enqueue (default: 30)")
     args = parser.parse_args()
@@ -4201,6 +5141,10 @@ def main() -> None:
         return
     root = Path(os.getenv("STUDIO_DIR", "/workspace")).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    if args.readiness or args.provision_dependencies:
+        report = provision_dependencies(root, lambda message: LOG.info(message), install=args.provision_dependencies)
+        print(json.dumps({"readiness":report,"models":[c.snapshot() for c in registry()]},indent=2))
+        return
     if args.enqueue:
         request = MovieQueue(root).enqueue(Path(args.enqueue).read_text(encoding="utf-8-sig"), args.minutes)
         print(f"Queued {request['id']}: {request['minutes']} minutes; status={request['status']}; cloud backup=None")
@@ -4211,6 +5155,10 @@ def main() -> None:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(threadName)s %(message)s"))
     LOG.addHandler(handler)
     LOG.addHandler(logging.StreamHandler())
+    readiness = provision_dependencies(root, lambda message: LOG.info(message),
+                                       install=os.getenv("STUDIO_AUTO_INSTALL","1") == "1")
+    if not readiness.get("ready"):
+        raise RuntimeError("Essential dependency missing or incompatible. Run --readiness; unsafe upgrades are not automatic.")
     if args.prepare:
         automatic_workflow(root, lambda message: LOG.info(message))
         return
@@ -4225,6 +5173,7 @@ def main() -> None:
         server_port=int(os.getenv("STUDIO_PORT", "7860")),
         auth=(username, password) if username else None,
         allowed_paths=[str(root / "public_media")],
+        max_file_size=32*1024**2,
         blocked_paths=[str(root / "state.json"), str(root / "production_queue.json"), str(root / "studio.log"), str(root / "credentials.key"),
                        str(Path(os.getenv("GOOGLE_OAUTH_CLIENT_FILE", str(root / "google_oauth_client.json"))).resolve()),
                        str(Path(os.getenv("STUDIO_CREDENTIALS_FILE", str(root / ".credentials"))).resolve())])

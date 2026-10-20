@@ -12,6 +12,10 @@ __pycache__/
 /studio.lock
 /runs/
 /public_media/
+/movie_output/
+/.backups/
+/.staging/
+!.env.example
 /setup/
 /production_queue.json
 /queue_guard/

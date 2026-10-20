@@ -1,0 +1,109 @@
+AUTONOMOUS CINEMATIC STUDIO — OPERATIONS
+
+Run on the existing Vast.ai environment
+  cd /workspace/movie-maker
+  /venv/main/bin/python app.py --readiness
+  /venv/main/bin/python app.py --provision-dependencies
+  supervisorctl status movie-studio
+  supervisorctl restart movie-studio
+
+The existing supervisor wrapper sets COMFY_URL=http://127.0.0.1:18188,
+STUDIO_HOST=127.0.0.1 and STUDIO_PORT=7860. Keep its other environment settings.
+For a new installation, use python -m pip install -r requirements.txt, then
+python app.py. The .env.example is documentation; it is not automatically loaded.
+Export the desired variables in the service environment. Never commit secrets.
+
+Access from the Windows PC
+  http://localhost:7860/
+The existing studio_tunnel.py helper supports the encrypted key through the
+Windows SSH agent. Alternatively, run this in a separate local terminal:
+  ssh -i C:\Users\DARKEYES\.ssh\id_ed25519 -p 41059 root@93.91.156.106 -N -L 7860:127.0.0.1:7860 -L 7862:127.0.0.1:7862
+Keep the tunnel running. The server's localhost URL alone is not accessible from
+another machine without forwarding. Port 7862 is only needed for Google OAuth.
+
+New productions
+Use Plan story without rendering to review the adaptive coverage. The editable
+JSON is a draft, validated again at production start. Blank means automatic.
+Scenes, logical camera takes and backend generation tasks are distinct. The
+existing exported ComfyUI profile remains five seconds per generation task;
+longer continuous takes therefore require multiple tasks. H3 uses its declared
+4–15 second limits. Coverage changes do not chain the preceding composition.
+An optional LLM_MODEL/LLM_URL uses the existing OpenAI-compatible narrative
+endpoint to refine actions, dialogue, eyelines and cast within validated task
+durations. Invalid responses keep the complete structural plan by default;
+LLM_FAILURE_POLICY=fail instead stops before generation.
+
+H3
+Hosted MiniMax-H3 and MiniMax-H3-Max use the official V2 API. Enable explicitly
+with MINIMAX_ENABLED=1 and MINIMAX_API_KEY in the service environment. These are
+paid external tasks. A read-only task-list preflight precedes generation.
+Auto policy falls back to the existing workflow before any paid request if
+preflight fails. H3-required policy stops. No mid-task paid submission is replayed
+automatically after an ambiguous response. Use the saved request fingerprint and
+your provider task list to identify the accepted task, select the correct phase,
+attach its task ID, then Resume. Association is an explicit operator decision;
+the provider does not expose a replay-safe idempotency key in the checked docs.
+
+ContextIR and 2K regeneration are off by default and create additional provider
+tasks when selected. ContextIR consumes its returned prompt, not a video URL.
+2K regeneration requires provider whitelist access. A denied request stops with
+the checkpoint/source task retained. It does not silently substitute a resize.
+Local H3 base variants are documented in the registry but marked unverified;
+registered ComfyUI nodes do not establish weights/runtime readiness. No large
+H3 weights are downloaded. Do not attempt them on the audited low-space host.
+
+References and revision
+Approved identity assets are selected per shot with count, duration, request-size,
+format and checksum checks. Critical references that exceed budget stop with an
+actionable error. H3 endpoint mode and identity-reference mode cannot be mixed.
+Pause waits for the in-flight shot and queued media work; it never interrupts
+unrelated ComfyUI jobs. Upload separate approved start/end keyframes after pause.
+The opaque ComfyUI profile accepts a start image only; end-frame conditioning is
+rejected unless a declared compatible backend is selected. Regeneration archives
+and verifies the selected shot/prior master, preserves neighboring media and
+flags dependent shots for review. Revisions receive new submission markers and
+disable auto-stop for review. Existing approved assets are not silently replaced.
+
+Media, history and storage
+Native H3 audio is retained when readable. Procedural ambience is a fallback,
+not spoken dialogue, lip-sync, music composition or event-aligned foley. The
+cinematic grade is SDR grading/grain/center crop, not a calibrated film or HDR
+mastering transform. 4K delivery is a resize unless an actual native source
+exists; source/detail provenance is recorded. All newly orchestrated final
+masters pass full decode, duration and stream checks before delivery. A JSON
+quality report explicitly marks identity, lip-sync and dialogue as unmeasured.
+Use Production history to preview/download previous movies. Preview proxies are
+smaller than masters. Deletion requires the checkbox; current checkpoint,
+ComfyUI originals and cloud copies remain protected. Local PC Storage means
+the machine running Python; download the master to save it to the Windows PC.
+
+Shutdown and recovery
+New UI productions have GPU auto-stop off until explicitly selected. Existing
+checkpoint shutdown policy is preserved. Selected cloud delivery must verify
+before stopping; failed upload retains local media/checkpoint. Queued production
+handoff precedes shutdown. Use Attach / Resume Checkpoint after correcting a
+failure. Do not delete state.json or lock files to bypass a running process.
+
+Validation
+  python app.py --self-test
+  python -m unittest test_cinematic_engine -v
+  python -m unittest test_media_acceptance -v
+  python app.py --media-self-test
+Provider tests use mocks and never count as real H3 generation. The media test
+uses real FFmpeg with synthetic source media and performs no cloud/GPU teardown.
+Startup extends the existing setup lock, manifest, model cache and installer.
+Only missing packages are installed. Installed version conflicts are reported
+without upgrading Torch, CUDA, drivers or compatible libraries. Optional cloud
+packages do not disable the local pipeline. FFmpeg installation is attempted
+only on supported root Linux environments using the OS package manager.
+
+Backups and rollback
+Local pre-change copies: .backups/orchestration-20261020-113114/.
+Verified remote code backup: /workspace/movie-maker/.backups/deployment-20261020-185814/.
+Remote deployment creates a private timestamped backup of the installed Python
+files/manifest and a checkpoint snapshot before service restart. Never restore
+the old checkpoint over a newer running film as part of code rollback.
+For code rollback: stop movie-studio, copy the backed-up app.py and requirements
+back, retain the latest /workspace/state.json and run folders, then start the
+service. Review the saved log and ensure the same job resumes. The new module
+may remain unused. Do not restart ComfyUI or delete model/output directories.
