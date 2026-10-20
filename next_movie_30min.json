@@ -2095,6 +2095,7 @@
     "preset": "slow",
     "retain_raw_copies": false,
     "maxrate_mbps": 5,
-    "bufsize_mbit": 4
+    "bufsize_mbit": 4,
+    "preview_container": "mp4"
   }
 }

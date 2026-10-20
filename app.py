@@ -753,7 +753,7 @@ def postproduction_config(audio: bool = True, cinematic: bool = True) -> dict[st
 
 def validated_render_settings(value: Any) -> dict[str, Any]:
     """Bounded per-movie delivery settings for an authored production request."""
-    if not isinstance(value, dict) or set(value) - {"width", "height", "crf", "grain", "preset", "retain_raw_copies", "maxrate_mbps", "bufsize_mbit"}:
+    if not isinstance(value, dict) or set(value) - {"width", "height", "crf", "grain", "preset", "retain_raw_copies", "maxrate_mbps", "bufsize_mbit", "preview_container"}:
         raise ValueError("Unknown or invalid per-movie render settings")
     for key in ("width", "height"):
         if key in value and (type(value[key]) is not int or not 64 <= value[key] <= 3840 or value[key] % 2):
@@ -765,6 +765,8 @@ def validated_render_settings(value: Any) -> dict[str, Any]:
         raise ValueError("Delivery preset must be medium, slow or slower")
     if "retain_raw_copies" in value and type(value["retain_raw_copies"]) is not bool:
         raise ValueError("retain_raw_copies must be boolean")
+    if value.get("preview_container", "ts") not in {"mp4", "ts"}:
+        raise ValueError("Preview container must be mp4 or ts")
     for key, ceiling in (("maxrate_mbps", 50), ("bufsize_mbit", 100)):
         if key in value and (type(value[key]) is not int or not 1 <= value[key] <= ceiling):
             raise ValueError("Invalid bounded video bitrate settings")
@@ -2227,6 +2229,7 @@ class Studio:
                 "reference": str(reference) if reference else None, "anchor": anchor, "master_seed": master_seed,
                 "workflow": graph, "comfy": config, "media": {"width": width, "height": height, "fps": fps,
                     "retain_raw_copies": render_settings.get("retain_raw_copies", True),
+                    "preview_container": render_settings.get("preview_container", "ts"),
                     "postproduction": finishing},
                 "cloud": cloud, "shutdown": True, "master_shot_ids": []}
             self.store.save()
@@ -2383,6 +2386,8 @@ class Studio:
         state = self.store.data
         folder = Path(state["folder"])
         raw = folder / f"raw_{shot['shot_id']:04d}.mp4"
+        if not raw.is_file() and self.restore_raw_copy(shot, raw):
+            self.checkpoint_shot(shot, status="rendered")
         if shot.get("status") == "rendered" and raw.is_file() and shot.get("raw_sha256") == digest(raw):
             self.capture_continuity(client, shot, raw)
             return raw
@@ -2411,7 +2416,7 @@ class Studio:
                 with pending.open("r+b") as handle:
                     os.fsync(handle.fileno())
                 os.replace(pending, raw)
-                self.checkpoint_shot(shot, status="rendered", raw_sha256=digest(raw))
+                self.checkpoint_shot(shot, status="rendered", raw_sha256=digest(raw), original_output=str(source.resolve()))
                 self.capture_continuity(client, shot, raw)
                 return raw
             except Exception as exc:
@@ -2595,7 +2600,8 @@ class Studio:
                             # Preserve old checkpoints' silent/non-graded look.
                             retry(lambda: normalize(raw, clip, media), f"Normalize shot {shot['shot_id']}", self.notice)
                             details = {}
-                        transport = retry(lambda: preview(clip), "Prepare preview", self.notice)
+                        transport = (clip if media.get("preview_container") == "mp4" else
+                                     retry(lambda: preview(clip), "Prepare preview", self.notice))
                     except Exception as exc:
                         self.checkpoint_shot(shot, status="failed", last_error=type(exc).__name__)
                         self.notice(f"Shot {shot['shot_id']} media processing failed; skipping.")
@@ -2633,8 +2639,39 @@ class Studio:
         if (raw.resolve() != expected.resolve() or shot.get("status") != "completed"
                 or not clip.is_file() or digest(clip) != shot.get("clip_sha256")):
             raise ValueError("Refusing to release raw data before a verified finished clip exists")
+        original = self.verified_original(shot)
+        if not original:
+            self.notice(f"Shot {shot['shot_id']}: retaining private raw copy; no verified durable ComfyUI original is recorded.")
+            return
         raw.unlink(missing_ok=True)
         self.checkpoint_shot(shot, private_raw_released_at=utc())
+
+    def verified_original(self, shot: dict[str, Any]) -> Path | None:
+        filename = shot.get("original_output")
+        output_dir = self.store.data.get("comfy", {}).get("output_dir")
+        if not filename or not output_dir or not shot.get("raw_sha256"):
+            return None
+        source = Path(filename).resolve()
+        if (not source.is_relative_to(Path(output_dir).resolve()) or not source.is_file()
+                or digest(source) != shot["raw_sha256"]):
+            return None
+        return source
+
+    def restore_raw_copy(self, shot: dict[str, Any], raw: Path) -> bool:
+        """Recover through a durable path/hash even after ComfyUI history resets."""
+        expected = Path(self.store.data["folder"]) / f"raw_{shot['shot_id']:04d}.mp4"
+        if raw.resolve() != expected.resolve():
+            raise ValueError("Raw recovery destination is outside this shot's private path")
+        source = self.verified_original(shot)
+        if not source:
+            return False
+        pending = raw.with_suffix(".recovering.mp4")
+        shutil.copyfile(source, pending)
+        with pending.open("r+b") as handle:
+            os.fsync(handle.fileno())
+        os.replace(pending, raw)
+        fsync_directory(raw.parent)
+        return True
 
     def recover_clips(self) -> None:
         for shot in self.store.data["shots"]:
@@ -2647,10 +2684,11 @@ class Studio:
                     or (sound and (not audio.is_file() or digest(audio) != shot.get("audio_sha256")))):
                 self.notice(f"Shot {shot['shot_id']} media checkpoint missing/corrupt; recovering output.")
                 raw = clip.with_name(f"raw_{shot['shot_id']:04d}.mp4")
-                reusable = raw.is_file() and digest(raw) == shot.get("raw_sha256")
+                reusable = ((raw.is_file() and digest(raw) == shot.get("raw_sha256"))
+                            or self.restore_raw_copy(shot, raw))
                 self.checkpoint_shot(shot, status="rendered" if reusable else "submitted" if shot.get("prompt_id") else "pending", attempts=0)
                 continue
-            transport = clip.with_suffix(".ts")
+            transport = clip if self.store.data.get("media", {}).get("preview_container") == "mp4" else clip.with_suffix(".ts")
             if not transport.exists():
                 transport = preview(clip)
             public_transport = self.publish_media(transport)
@@ -3128,17 +3166,21 @@ def self_test() -> None:
                 raw, clip, backend = root / "raw_0001.mp4", root / "shot_0001.mp4", root / "backend_original.mp4"
                 raw.write_bytes(b"raw")
                 clip.write_bytes(b"finished")
-                backend.write_bytes(b"original")
-                shot = {"shot_id": 1, "status": "completed", "clip_sha256": digest(clip)}
+                backend.write_bytes(b"raw")
+                shot = {"shot_id": 1, "status": "completed", "clip_sha256": digest(clip),
+                        "raw_sha256": digest(raw), "original_output": str(backend)}
                 studio = Studio(root, acquire_lock=False)
-                studio.store.data = {"schema": 1, "folder": tmp, "shots": [shot], "media": {"retain_raw_copies": False}}
+                studio.store.data = {"schema": 1, "folder": tmp, "shots": [shot], "media": {"retain_raw_copies": False},
+                                     "comfy": {"output_dir": tmp}}
                 with self.assertRaises(ValueError):
                     studio.release_duplicate_raw(shot, backend)
                 self.assertTrue(backend.exists())
                 studio.release_duplicate_raw(shot, raw)
                 self.assertFalse(raw.exists())
                 self.assertEqual(clip.read_bytes(), b"finished")
-                self.assertEqual(backend.read_bytes(), b"original")
+                self.assertEqual(backend.read_bytes(), b"raw")
+                self.assertTrue(studio.restore_raw_copy(shot, raw))
+                self.assertEqual(raw.read_bytes(), b"raw")
 
         def test_authored_storyboard_duration_and_scene_boundaries(self):
             plot = json.dumps({"plot": "A traveler enters then leaves", "storyboard": [
