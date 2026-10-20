@@ -2086,5 +2086,15 @@
       ]
     }
   ],
-  "creative_constraints": "One visible protagonist throughout. No dialogue, narration, crowds, titles or readable lettering. Muted blue-gray coastal palette with restrained warm copper and ochre highlights. Natural weather, restrained camera movement, clear mechanical causality and patient performance. Sound is procedural ambient weather and machinery; do not imply generated speech or a composed score."
+  "creative_constraints": "One visible protagonist throughout. No dialogue, narration, crowds, titles or readable lettering. Muted blue-gray coastal palette with restrained warm copper and ochre highlights. Natural weather, restrained camera movement, clear mechanical causality and patient performance. Sound is procedural ambient weather and machinery; do not imply generated speech or a composed score.",
+  "render_settings": {
+    "width": 1280,
+    "height": 720,
+    "crf": 18,
+    "grain": 1,
+    "preset": "slow",
+    "retain_raw_copies": false,
+    "maxrate_mbps": 5,
+    "bufsize_mbit": 4
+  }
 }

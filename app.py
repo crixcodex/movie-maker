@@ -88,7 +88,14 @@ Follow-up queue:
   Requests persist in production_queue.json. Successful jobs archive their own
   final_movie.mp4 before handing off. GPU stop is deferred until the queue drains;
   backup failures still block both handoff and shutdown. Queued jobs are text-only,
-  local-storage jobs with default sound/grading; no credentials enter the queue.
+  local-storage jobs with sound/grading; no credentials enter the queue.
+  Structured plot render_settings may freeze width/height, crf (12–23), grain
+  (0–5), preset (medium/slow/slower), maxrate_mbps + bufsize_mbit and
+  retain_raw_copies. The supplied 30-minute film targets native-width 1280x536,
+  CRF 18, light grain, slow encoding and a 5 Mbps video ceiling for this instance's
+  limited disk. retain_raw_copies=false removes only verified redundant private
+  raw copies after assembly; ComfyUI originals, prompt IDs, graded clips, PCM
+  audio and final archives remain. Native temporal-continuity jobs retain raw.
 Paths: STUDIO_DIR=/workspace COMFY_OUTPUT_DIR=/workspace/ComfyUI/output
 API: COMFY_URL=http://127.0.0.1:8188
 Local OpenAI-compatible LLM: LLM_URL=http://127.0.0.1:11434/v1
@@ -744,6 +751,28 @@ def postproduction_config(audio: bool = True, cinematic: bool = True) -> dict[st
             "loudness_lufs": -23, "true_peak_db": -2}
 
 
+def validated_render_settings(value: Any) -> dict[str, Any]:
+    """Bounded per-movie delivery settings for an authored production request."""
+    if not isinstance(value, dict) or set(value) - {"width", "height", "crf", "grain", "preset", "retain_raw_copies", "maxrate_mbps", "bufsize_mbit"}:
+        raise ValueError("Unknown or invalid per-movie render settings")
+    for key in ("width", "height"):
+        if key in value and (type(value[key]) is not int or not 64 <= value[key] <= 3840 or value[key] % 2):
+            raise ValueError("Delivery dimensions must be even integers between 64 and 3840")
+    for key, low, high in (("crf", 12, 23), ("grain", 0, 5)):
+        if key in value and (type(value[key]) is not int or not low <= value[key] <= high):
+            raise ValueError(f"Render {key} must be an integer between {low} and {high}")
+    if "preset" in value and value["preset"] not in {"medium", "slow", "slower"}:
+        raise ValueError("Delivery preset must be medium, slow or slower")
+    if "retain_raw_copies" in value and type(value["retain_raw_copies"]) is not bool:
+        raise ValueError("retain_raw_copies must be boolean")
+    for key, ceiling in (("maxrate_mbps", 50), ("bufsize_mbit", 100)):
+        if key in value and (type(value[key]) is not int or not 1 <= value[key] <= ceiling):
+            raise ValueError("Invalid bounded video bitrate settings")
+    if ("maxrate_mbps" in value) != ("bufsize_mbit" in value):
+        raise ValueError("Video maxrate and buffer size must be supplied together")
+    return copy.deepcopy(value)
+
+
 def audio_plan(shot: dict[str, Any]) -> dict[str, Any]:
     """Deterministic procedural fallback, not an event-aligned neural Foley model.
 
@@ -900,6 +929,8 @@ def normalize(source: Path, target: Path, media: dict[str, Any],
     if settings:
         args += ["-tune", "grain" if settings.get("cinematic") else "film", "-profile:v", "high",
                  "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
+    if settings.get("maxrate_mbps"):
+        args += ["-maxrate", f"{settings['maxrate_mbps']}M", "-bufsize", f"{settings['bufsize_mbit']}M"]
     args += ["-movflags", "+faststart", str(temporary)]
     run(args)
     if abs(probe(temporary) - 5) > 0.1:
@@ -996,7 +1027,7 @@ class MovieQueue:
     def enqueue(self, plot: str, minutes: float = 30) -> dict[str, Any]:
         if not isinstance(plot, str) or not plot.strip() or len(plot) > 250000 or not 5 / 60 <= minutes <= 60:
             raise ValueError("Queued movie needs a plot and duration between five seconds and 60 minutes")
-        story_input(plot)
+        validated_render_settings(story_input(plot).get("render_settings", {}))
         fingerprint = hashlib.sha256((plot + f"\n{minutes:.6f}").encode()).hexdigest()
         def update(items: list[dict[str, Any]]) -> dict[str, Any]:
             existing = next((item for item in items if item.get("fingerprint") == fingerprint
@@ -2123,6 +2154,7 @@ class Studio:
             if not plot.strip():
                 raise ValueError("Provide a movie plot")
             story_input(plot)  # Validate structured input before creating a job.
+            render_settings = validated_render_settings(story_input(plot).get("render_settings", {}))
             count = int(round(float(minutes) * 60 / 5))
             if not 1 <= count <= 720:
                 raise ValueError("Duration must be between five seconds and 60 minutes")
@@ -2179,11 +2211,14 @@ class Studio:
                 anchor.update(image_path=str(reference), image_sha256=digest(reference))
             width = int(os.getenv("MOVIE_WIDTH", "1920"))
             height = int(os.getenv("MOVIE_HEIGHT", "1080"))
+            width, height = render_settings.get("width", width), render_settings.get("height", height)
             fps = int(os.getenv("MOVIE_FPS", "24"))
             if min(width, height) < 64 or width % 2 or height % 2 or not 1 <= fps <= 120:
                 raise ValueError("Media dimensions must be even and >=64; fps must be 1–120")
             if self.store.path.exists():
                 atomic_bytes(Path(self.store.data["folder"]) / "state.archive.json", self.store.path.read_bytes())
+            finishing = postproduction_config(sound_design, cinematic)
+            finishing.update({k: v for k, v in render_settings.items() if k in {"crf", "grain", "preset", "maxrate_mbps", "bufsize_mbit"}})
             self.store.data = {"schema": 1, "job_id": job_id, "folder": str(folder), "created_at": utc(),
                 "status": "setting_up" if setup_pending else "planning", "setup_pending": setup_pending,
                 "story_engine_version": 1,
@@ -2191,7 +2226,8 @@ class Studio:
                 "plot": plot, "shot_count": count, "shots": [],
                 "reference": str(reference) if reference else None, "anchor": anchor, "master_seed": master_seed,
                 "workflow": graph, "comfy": config, "media": {"width": width, "height": height, "fps": fps,
-                    "postproduction": postproduction_config(sound_design, cinematic)},
+                    "retain_raw_copies": render_settings.get("retain_raw_copies", True),
+                    "postproduction": finishing},
                 "cloud": cloud, "shutdown": True, "master_shot_ids": []}
             self.store.save()
             with self.live_lock:
@@ -2569,6 +2605,7 @@ class Studio:
                     with self.live_lock:
                         self.streams.append(str(public_transport))
                     retry(self.assemble, "Master assembly", self.notice)
+                    self.release_duplicate_raw(shot, raw)
                 finally:
                     work.task_done()
         except BaseException as exc:
@@ -2580,6 +2617,24 @@ class Studio:
                 work.task_done()
                 if item is None:
                     return
+
+    def release_duplicate_raw(self, shot: dict[str, Any], raw: Path) -> None:
+        """Opt-in disk policy: release only this job's redundant private raw copy.
+
+        The ComfyUI original and prompt ID remain available for recovery. Native
+        continuity jobs keep their raw copies. Graded clips and PCM remain durable.
+        """
+        state = self.store.data
+        if (state.get("media", {}).get("retain_raw_copies", True)
+                or state.get("comfy", {}).get("consistency", {}).get("continuity", {}).get("mode", "off") != "off"):
+            return
+        expected = Path(state["folder"]) / f"raw_{shot['shot_id']:04d}.mp4"
+        clip = expected.with_name(f"shot_{shot['shot_id']:04d}.mp4")
+        if (raw.resolve() != expected.resolve() or shot.get("status") != "completed"
+                or not clip.is_file() or digest(clip) != shot.get("clip_sha256")):
+            raise ValueError("Refusing to release raw data before a verified finished clip exists")
+        raw.unlink(missing_ok=True)
+        self.checkpoint_shot(shot, private_raw_released_at=utc())
 
     def recover_clips(self) -> None:
         for shot in self.store.data["shots"]:
@@ -3050,6 +3105,41 @@ def self_test() -> None:
     from unittest.mock import Mock, patch
 
     class Tests(unittest.TestCase):
+        def test_authored_delivery_settings_are_bounded_and_checkpointed(self):
+            overrides = {"width": 1280, "height": 720, "crf": 18, "grain": 1, "preset": "slow",
+                         "retain_raw_copies": False, "maxrate_mbps": 5, "bufsize_mbit": 4}
+            with tempfile.TemporaryDirectory() as tmp:
+                studio = Studio(Path(tmp), acquire_lock=False)
+                with patch(__name__ + ".workflow_config", return_value=({}, {})), \
+                     patch(__name__ + ".anchor_workflow_config", return_value=({}, {})), patch.object(studio, "launch"):
+                    studio.start(json.dumps({"plot": "A film", "render_settings": overrides}), None, 30, "None", "", "")
+                media = studio.store.data["media"]
+                self.assertEqual(media["width"], 1280)
+                self.assertFalse(media["retain_raw_copies"])
+                self.assertEqual(media["postproduction"]["maxrate_mbps"], 5)
+                self.assertEqual(media["postproduction"]["crf"], 18)
+            for invalid in ({"crf": 99}, {"width": "1280"}, {"maxrate_mbps": 5}, {"retain_raw_copies": 0}):
+                with self.assertRaises(ValueError):
+                    validated_render_settings(invalid)
+
+        def test_raw_copy_release_preserves_original_and_finished_media(self):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                raw, clip, backend = root / "raw_0001.mp4", root / "shot_0001.mp4", root / "backend_original.mp4"
+                raw.write_bytes(b"raw")
+                clip.write_bytes(b"finished")
+                backend.write_bytes(b"original")
+                shot = {"shot_id": 1, "status": "completed", "clip_sha256": digest(clip)}
+                studio = Studio(root, acquire_lock=False)
+                studio.store.data = {"schema": 1, "folder": tmp, "shots": [shot], "media": {"retain_raw_copies": False}}
+                with self.assertRaises(ValueError):
+                    studio.release_duplicate_raw(shot, backend)
+                self.assertTrue(backend.exists())
+                studio.release_duplicate_raw(shot, raw)
+                self.assertFalse(raw.exists())
+                self.assertEqual(clip.read_bytes(), b"finished")
+                self.assertEqual(backend.read_bytes(), b"original")
+
         def test_authored_storyboard_duration_and_scene_boundaries(self):
             plot = json.dumps({"plot": "A traveler enters then leaves", "storyboard": [
                 {"scene_id": "arrival", "shots": ["Enters the station", "Waits by a window"]},
